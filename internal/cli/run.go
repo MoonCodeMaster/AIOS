@@ -93,6 +93,12 @@ func runMain(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// project.md is optional — early projects may not have synthesised one yet.
+	// When absent, prompts render with empty project fields rather than failing.
+	project, err := loadProject(wd)
+	if err != nil {
+		return fmt.Errorf("load project.md: %w", err)
+	}
 
 	onlyID, _ := cmd.Flags().GetString("task")
 	mr, _ := cmd.Flags().GetInt("max-rounds")
@@ -225,14 +231,70 @@ func runMain(cmd *cobra.Command, args []string) error {
 			maxTokens = mt
 		}
 
+		// Gather static prompt context once per task (project, README, test
+		// file index, similar tasks). This is reused across coder rounds.
+		pctx := buildProjectContext(wd, wt.Path, project, tk, tasks)
+
+		renderCoder := func(in orchestrator.CoderInput) string {
+			if !in.IsRevision {
+				out, err := prompts.Render("coder.tmpl", coderData{
+					Project:       pctx.Project,
+					Task:          in.Task,
+					Workdir:       pctx.Workdir,
+					ReadmeExcerpt: pctx.ReadmeExcerpt,
+					TestFiles:     pctx.TestFiles,
+					SimilarTasks:  pctx.SimilarTasks,
+				})
+				if err != nil {
+					// Falling back to a terse string is safer than failing the
+					// whole run on a template error — recoverable in a later round.
+					return fmt.Sprintf("coder render error: %v\nTask: %s\n%s",
+						err, in.Task.ID, in.Task.Body)
+				}
+				return out
+			}
+			out, err := prompts.Render("coder-revise.tmpl", coderReviseData{
+				Project:       pctx.Project,
+				Task:          in.Task,
+				Workdir:       pctx.Workdir,
+				ReadmeExcerpt: pctx.ReadmeExcerpt,
+				Round:         in.Round,
+				PrevDiff:      in.PrevDiff,
+				PrevChecks:    in.PrevChecks,
+				Issues:        in.Issues,
+			})
+			if err != nil {
+				return fmt.Sprintf("coder-revise render error: %v\nTask: %s",
+					err, in.Task.ID)
+			}
+			return out
+		}
+
+		renderReviewer := func(task *spec.Task, diff string, ck []verify.CheckResult) string {
+			out, err := prompts.Render("reviewer.tmpl", reviewerData{
+				Project: pctx.Project,
+				Task:    task,
+				Diff:    diff,
+				Checks:  ck,
+			})
+			if err != nil {
+				return fmt.Sprintf("reviewer render error: %v\nTask: %s\nDiff:\n%s",
+					err, task.ID, diff)
+			}
+			return out
+		}
+
 		dep := &orchestrator.Deps{
-			Coder:    coderEng,
-			Reviewer: reviewerEng,
-			Verifier: liveVerifier{workdir: wt.Path, checks: checks, timeout: 5 * time.Minute},
-			Diff:     func() (string, error) { return wm.Diff(wt, cfg.Project.StagingBranch) },
-			MaxRounds: maxRounds,
-			MaxTokens: maxTokens,
-			MaxWall:   time.Duration(cfg.Budget.MaxWallMinutesPerTask) * time.Minute,
+			Coder:          coderEng,
+			Reviewer:       reviewerEng,
+			Verifier:       liveVerifier{workdir: wt.Path, checks: checks, timeout: 5 * time.Minute},
+			Diff:           func() (string, error) { return wm.Diff(wt, cfg.Project.StagingBranch) },
+			Workdir:        wt.Path,
+			RenderCoder:    renderCoder,
+			RenderReviewer: renderReviewer,
+			MaxRounds:      maxRounds,
+			MaxTokens:      maxTokens,
+			MaxWall:        time.Duration(cfg.Budget.MaxWallMinutesPerTask) * time.Minute,
 		}
 
 		fmt.Printf("→ task %s (%s)\n", tk.ID, tk.Kind)
@@ -280,18 +342,34 @@ func runMain(cmd *cobra.Command, args []string) error {
 		_ = updateTaskFile(tk)
 		fmt.Printf("✓ task %s converged in %d rounds\n", tk.ID, len(outcome.Rounds))
 
+		// reVerify is called by MergeQueue after a successful rebase. It runs
+		// the project verify checks against the rebased branch in the main
+		// repo dir (the rebase is performed there, so HEAD is the rebased
+		// state). Returns (false, summary) when any check fails.
+		reVerify := func() (bool, string) {
+			results := verify.Run(context.Background(), wd, checks, 5*time.Minute)
+			if verify.AllGreen(results) {
+				return true, ""
+			}
+			var failed []string
+			for _, r := range results {
+				switch r.Status {
+				case verify.StatusFailed, verify.StatusTimedOut:
+					failed = append(failed, fmt.Sprintf("%s=%s", r.Name, r.Status))
+				}
+			}
+			return false, strings.Join(failed, ",")
+		}
+
 		// reReview is called by MergeQueue when a rebase changes the diff.
 		// It re-invokes the reviewer engine on the rebased diff so that a
 		// diff the reviewer has never seen is never silently merged.
 		reReview := func(newDiff []byte) (bool, error) {
-			promptText, err := prompts.Render("reviewer.tmpl", struct {
-				Task   *spec.Task
-				Diff   string
-				Checks []verify.CheckResult
-			}{
-				Task:   tk,
-				Diff:   string(newDiff),
-				Checks: []verify.CheckResult{},
+			promptText, err := prompts.Render("reviewer.tmpl", reviewerData{
+				Project: pctx.Project,
+				Task:    tk,
+				Diff:    string(newDiff),
+				Checks:  []verify.CheckResult{},
 			})
 			if err != nil {
 				return false, fmt.Errorf("rebase re-review render: %w", err)
@@ -324,6 +402,7 @@ func runMain(cmd *cobra.Command, args []string) error {
 				ParentSHA: parentSHA,
 				Diff:      []byte(postDiff),
 				ReReview:  reReview,
+				ReVerify:  reVerify,
 			}
 	}
 

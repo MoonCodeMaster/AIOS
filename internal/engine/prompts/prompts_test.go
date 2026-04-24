@@ -5,30 +5,111 @@ import (
 	"testing"
 )
 
-func TestRender_Coder(t *testing.T) {
+func mustContain(t *testing.T, out string, parts ...string) {
+	t.Helper()
+	for _, p := range parts {
+		if !strings.Contains(out, p) {
+			t.Errorf("output missing %q\nfull output:\n%s", p, out)
+		}
+	}
+}
+
+func TestRender_Coder_IncludesAllContext(t *testing.T) {
 	out, err := Render("coder.tmpl", map[string]any{
-		"Project": map[string]string{"Goal": "reverse argv"},
+		"Project": map[string]any{
+			"Name":     "ToyApp",
+			"Goal":     "reverse argv",
+			"NonGoals": []string{"do not parse JSON"},
+		},
 		"Task": map[string]any{
 			"ID":         "001-a",
-			"Body":       "Do the thing.",
-			"Acceptance": []string{"criterion one", "criterion two"},
+			"Kind":       "feature",
+			"Body":       "Implement reverseArgv.",
+			"Acceptance": []string{"prints reversed args", "exits 0 on empty argv"},
+		},
+		"Workdir":       "/tmp/work/001-a",
+		"ReadmeExcerpt": "## ToyApp\nReverses arguments.",
+		"TestFiles":     []string{"main_test.go", "internal/util/util_test.go"},
+		"SimilarTasks": []map[string]any{
+			{"ID": "000-scaffold", "Kind": "feature", "Acceptance": []string{"main exists"}},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"001-a", "reverse argv", "criterion one", "criterion two"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output missing %q:\n%s", want, out)
-		}
+	mustContain(t, out,
+		"001-a", "feature", "reverse argv",
+		"do not parse JSON",
+		"## ToyApp",
+		"main_test.go",
+		"000-scaffold",
+		"prints reversed args",
+		"Do not commit",
+	)
+}
+
+func TestRender_Coder_DegradesGracefullyWithoutContext(t *testing.T) {
+	// No Project, no README, no test files, no similar tasks. Should still render.
+	out, err := Render("coder.tmpl", map[string]any{
+		"Task": map[string]any{
+			"ID":         "001",
+			"Kind":       "scaffold",
+			"Body":       "scaffold the package",
+			"Acceptance": []string{"package builds"},
+		},
+		"Workdir": "/tmp/x",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, out, "001", "scaffold", "package builds")
+	if strings.Contains(out, "README excerpt:") {
+		t.Errorf("README section should be omitted when ReadmeExcerpt is empty")
 	}
 }
 
-func TestRender_Reviewer_EmitsJSONBlock(t *testing.T) {
-	out, err := Render("reviewer.tmpl", map[string]any{
+func TestRender_CoderRevise_CarriesPriorRound(t *testing.T) {
+	out, err := Render("coder-revise.tmpl", map[string]any{
+		"Project": map[string]any{"Name": "ToyApp", "Goal": "reverse argv"},
 		"Task": map[string]any{
 			"ID":         "001-a",
-			"Acceptance": []string{"c1"},
+			"Kind":       "feature",
+			"Acceptance": []string{"prints reversed args"},
+		},
+		"Workdir":  "/tmp/work/001-a",
+		"Round":    2,
+		"PrevDiff": "diff --git a/main.go b/main.go\n+ // wrong",
+		"PrevChecks": []map[string]any{
+			{"Name": "test_cmd", "Status": "failed", "ExitCode": 1},
+		},
+		"Issues": []map[string]any{
+			{"Severity": "blocking", "Category": "correctness", "Note": "off-by-one in loop", "File": "main.go", "Line": 12},
+			{"Severity": "nit", "Category": "style", "Note": "unused var", "File": "", "Line": 0},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, out,
+		"001-a", "round 2",
+		"diff --git",          // prior diff
+		"test_cmd: failed",    // prior verify result
+		"Blocking",            // section header
+		"correctness",
+		"off-by-one in loop",
+		"main.go:12",
+		"Nits",
+		"unused var",
+	)
+}
+
+func TestRender_Reviewer_StructuredSchema(t *testing.T) {
+	out, err := Render("reviewer.tmpl", map[string]any{
+		"Project": map[string]any{"Name": "ToyApp", "Goal": "reverse argv"},
+		"Task": map[string]any{
+			"ID":         "001-a",
+			"Kind":       "feature",
+			"Acceptance": []string{"prints reversed args"},
 		},
 		"Diff":   "diff --git a/x b/x",
 		"Checks": []map[string]any{{"Name": "test_cmd", "Status": "passed", "ExitCode": 0}},
@@ -36,9 +117,47 @@ func TestRender_Reviewer_EmitsJSONBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, `"approved"`) {
-		t.Errorf("reviewer template should show JSON schema: %s", out)
+	// Schema must include all five issue fields and the category enum.
+	mustContain(t, out,
+		`"approved"`, `"criteria"`, `"issues"`,
+		`"category"`, `"file"`, `"line"`,
+		"correctness", "acceptance", "regression",
+		"test-coverage", "style", "security", "performance",
+		"approved` MUST be `false",
+	)
+}
+
+func TestRender_Brainstorm_HasMarker(t *testing.T) {
+	out, err := Render("brainstorm.tmpl", map[string]string{"Idea": "build a todo CLI"})
+	if err != nil {
+		t.Fatal(err)
 	}
+	mustContain(t, out, "build a todo CLI", "ONE AT A TIME", "[[BRAINSTORM DONE]]")
+}
+
+func TestRender_SpecSynth_FieldList(t *testing.T) {
+	out, err := Render("spec-synth.tmpl", map[string]string{"Transcript": "Q: ... A: ..."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, out,
+		"Q: ... A: ...",
+		"name", "goal", "non_goals", "constraints", "acceptance_bar",
+		"Architecture sketch", "Open questions",
+	)
+}
+
+func TestRender_Decompose_HasSeparatorRule(t *testing.T) {
+	out, err := Render("decompose.tmpl", map[string]string{"Spec": "spec body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, out,
+		"spec body",
+		"===TASK===",
+		"id", "kind", "depends_on", "status", "acceptance",
+		"scaffold", "feature", "bugfix", "refactor", "test-writing",
+	)
 }
 
 func TestRender_Unknown(t *testing.T) {

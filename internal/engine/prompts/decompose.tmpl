@@ -1,9 +1,39 @@
-You are AIOS. Decompose this spec into ordered tasks.
+You are AIOS. Break the spec below into a sequence of tasks the coder/reviewer
+loop can execute one at a time.
 
-SPEC:
+# Spec
 {{.Spec}}
 
-Output one markdown file per task, each separated by a line "===TASK==="
-with YAML frontmatter (id, kind, depends_on, status, acceptance) + short
-description. Kind is one of: feature, scaffold, greenfield, bugfix,
-refactor, test-writing. IDs are NNN-slug (zero-padded, sequential).
+# Output rules
+
+Output one markdown file per task. Separate consecutive tasks with a single
+line containing exactly:
+
+===TASK===
+
+Each task starts with YAML frontmatter delimited by lines of `---`, then a
+short markdown body.
+
+Frontmatter fields:
+
+- id          : NNN-slug, zero-padded, sequential (001-..., 002-..., ...)
+- kind        : one of: scaffold, greenfield, feature, bugfix, refactor, test-writing
+- depends_on  : list of task IDs that must converge before this one starts; empty list is OK
+- status      : pending
+- acceptance  : list of objective, testable criteria — the reviewer checks these literally
+
+The body is 5 to 20 lines explaining what the task does and any non-obvious
+context the coder needs.
+
+# Sizing
+
+A task should land in one or two coder rounds. If a task feels like "build the
+whole feature", split it. Typical patterns:
+
+- scaffold the package layout
+- implement the core type/function
+- add tests for it
+- wire it into the CLI/server/etc.
+
+Do not write tasks for documentation, release engineering, or "polish". Those
+are the user's gate, not the coder/reviewer loop's.

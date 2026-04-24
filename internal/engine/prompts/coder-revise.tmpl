@@ -1,11 +1,64 @@
-You are the AIOS coder revising task {{.Task.ID}}.
+You are the AIOS coder revising task {{.Task.ID}} ({{.Task.Kind}}), round {{.Round}}.
 
-The reviewer raised these blocking issues:
-{{range .Issues}}- [{{.Severity}}] {{.Note}}
-{{end}}
+# Project
+{{- if .Project}}
+{{.Project.Name}} — {{.Project.Goal}}
+{{- else}}
+(no project spec)
+{{- end}}
 
-Previous acceptance criteria:
-{{range .Task.Acceptance}}- {{.}}
-{{end}}
+Working directory: {{.Workdir}}
 
-Fix the issues in place. Keep changes minimal. Do not commit.
+# What you tried last round
+{{- if .PrevDiff}}
+
+Diff:
+---
+{{.PrevDiff}}
+---
+{{- else}}
+
+(no diff was produced — verify likely failed before any change landed)
+{{- end}}
+
+# Verify results from last round
+{{- if .PrevChecks}}
+{{- range .PrevChecks}}
+- {{.Name}}: {{.Status}}{{if .ExitCode}} (exit {{.ExitCode}}){{end}}
+{{- end}}
+{{- else}}
+(no verify results recorded)
+{{- end}}
+
+# Reviewer's response
+{{- $hasBlocking := false}}
+{{- range .Issues}}{{if eq .Severity "blocking"}}{{$hasBlocking = true}}{{end}}{{end}}
+{{- if $hasBlocking}}
+
+Blocking (must fix):
+{{- range .Issues}}{{if eq .Severity "blocking"}}
+- [{{.Category}}] {{.Note}}{{if .File}} ({{.File}}{{if .Line}}:{{.Line}}{{end}}){{end}}
+{{- end}}{{end}}
+{{- end}}
+{{- $hasNit := false}}
+{{- range .Issues}}{{if eq .Severity "nit"}}{{$hasNit = true}}{{end}}{{end}}
+{{- if $hasNit}}
+
+Nits (optional):
+{{- range .Issues}}{{if eq .Severity "nit"}}
+- [{{.Category}}] {{.Note}}{{if .File}} ({{.File}}{{if .Line}}:{{.Line}}{{end}}){{end}}
+{{- end}}{{end}}
+{{- end}}
+
+# Acceptance criteria (unchanged)
+{{- range .Task.Acceptance}}
+- {{.}}
+{{- end}}
+
+# Constraints
+- Address every blocking issue. Nits are optional.
+- Keep the change minimal — do not refactor unrelated code while you are here.
+- Re-running the same fix that was already rejected will get rejected again.
+  If a reviewer issue is wrong (e.g. asks you to revert correct behavior),
+  stop and reply in plain text instead of complying.
+- Do not commit.

@@ -1,10 +1,27 @@
-You are AIOS. Turn this brainstorm transcript into a project spec.
+You are AIOS. Convert this brainstorm transcript into the project spec at
+.aios/project.md.
 
-TRANSCRIPT:
+# Transcript
 {{.Transcript}}
 
-Output ONLY the contents of .aios/project.md (with YAML frontmatter):
-- `name`, `goal`, `non_goals`, `constraints`, `acceptance_bar`
-- Body: sections for Architecture sketch and Open questions
+# Output
 
-No preamble. No trailing commentary.
+Output ONLY the contents of .aios/project.md, with YAML frontmatter and a
+markdown body. No code fences around the whole document. No preamble.
+
+Frontmatter fields (all required):
+
+- name           : short project name
+- goal           : one sentence — the v0 outcome
+- non_goals      : list of explicit non-goals
+- constraints    : list of language/runtime/dependency/deployment constraints
+- acceptance_bar : list of objective conditions for v0 "done"
+
+Body sections:
+
+- ## Architecture sketch — 5 to 15 lines on the components and how they fit together
+- ## Open questions — bullet list; an empty list is OK if the brainstorm covered everything
+
+If the transcript is missing information for a required field, fill it with
+the placeholder TBD and add a bullet to "Open questions". Do not invent
+decisions the user did not make.
