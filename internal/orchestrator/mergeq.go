@@ -18,6 +18,12 @@ type MergeRequest struct {
 	// ReReview, if non-nil, is called on rebase paths where the diff changed.
 	// It receives the new diff and returns approved=true to allow the merge.
 	ReReview func(newDiff []byte) (approved bool, err error)
+	// ReVerify, if non-nil, is called after a successful rebase. It runs the
+	// project's verify checks against the rebased state and returns passed=true
+	// to allow the merge. A rebase can succeed mechanically while still
+	// breaking tests; this gate prevents silent correctness loss when two
+	// parallel tasks touch overlapping code.
+	ReVerify func() (passed bool, summary string)
 }
 
 type MergeResult struct {
@@ -103,6 +109,22 @@ func (q *MergeQueue) process(ctx context.Context, req MergeRequest) MergeResult 
 			_ = q.git(ctx, "checkout", "-q", q.stagingBranch)
 			q.logSink(fmt.Sprintf("%s rebase-review-rejected", req.TaskID))
 			return MergeResult{Status: "blocked", Reason: "rebase-review-rejected"}
+		}
+	}
+	// Re-run verification on the rebased branch HEAD (currently checked out
+	// in q.repoDir). Mechanical rebase success does not imply behavioral
+	// correctness — overlapping changes can produce a clean merge that still
+	// breaks tests.
+	if req.ReVerify != nil {
+		passed, summary := req.ReVerify()
+		if !passed {
+			_ = q.git(ctx, "checkout", "-q", q.stagingBranch)
+			q.logSink(fmt.Sprintf("%s rebase-verify-failed", req.TaskID))
+			reason := "rebase-verify-failed"
+			if summary != "" {
+				reason = reason + ": " + summary
+			}
+			return MergeResult{Status: "blocked", Reason: reason}
 		}
 	}
 	if err := q.git(ctx, "checkout", "-q", q.stagingBranch); err != nil {

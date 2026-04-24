@@ -115,6 +115,59 @@ func TestMergeQueueRebaseConflictBlocks(t *testing.T) {
 	}
 }
 
+// TestMergeQueueRebaseVerifyFails covers the case where a rebase succeeds
+// mechanically but post-rebase verification fails (e.g. two parallel tasks
+// touched the same file in non-conflicting lines but together broke a test).
+// The merge must be blocked and staging must NOT advance.
+func TestMergeQueueRebaseVerifyFails(t *testing.T) {
+	dir := gitInit(t)
+
+	// T1 lands first.
+	mustGit(t, dir, "checkout", "-q", "-b", "aios/task/T1", "aios/staging")
+	mustWrite(t, filepath.Join(dir, "a.txt"), "T1\n")
+	mustGit(t, dir, "add", ".")
+	mustGit(t, dir, "commit", "-q", "-m", "T1")
+	parent := gitSHA(t, dir, "aios/staging")
+
+	q := NewMergeQueue(dir, "aios/staging", &engine.FakeEngine{Name_: "rev"}, nil)
+	go q.Run(context.Background())
+	defer q.Close()
+
+	ack := make(chan MergeResult, 1)
+	q.Submit(MergeRequest{TaskID: "T1", Branch: "aios/task/T1", ParentSHA: parent, Diff: []byte(""), Ack: ack})
+	if r := <-ack; r.Status != "converged" {
+		t.Fatalf("T1 ff failed: %s", r.Reason)
+	}
+	stagingAfterT1 := gitSHA(t, dir, "aios/staging")
+
+	// T2 started from the OLD parent and changes a *different* file, so the
+	// rebase will succeed cleanly.
+	mustGit(t, dir, "checkout", "-q", "-b", "aios/task/T2", parent)
+	mustWrite(t, filepath.Join(dir, "b.txt"), "T2\n")
+	mustGit(t, dir, "add", ".")
+	mustGit(t, dir, "commit", "-q", "-m", "T2")
+
+	ack2 := make(chan MergeResult, 1)
+	q.Submit(MergeRequest{
+		TaskID:    "T2",
+		Branch:    "aios/task/T2",
+		ParentSHA: parent,
+		Diff:      []byte("ignored"),
+		Ack:       ack2,
+		ReVerify:  func() (bool, string) { return false, "test_cmd=failed" },
+	})
+	r := <-ack2
+	if r.Status != "blocked" {
+		t.Fatalf("expected blocked, got %s", r.Status)
+	}
+	if !strings.HasPrefix(r.Reason, "rebase-verify-failed") {
+		t.Fatalf("reason = %q, want rebase-verify-failed prefix", r.Reason)
+	}
+	if gitSHA(t, dir, "aios/staging") != stagingAfterT1 {
+		t.Errorf("staging advanced past T1 even though verify failed")
+	}
+}
+
 // osWrite is a tiny wrapper to avoid importing "os" twice in test helpers.
 func osWrite(path, s string) error {
 	return writeFileHelper(path, s)
