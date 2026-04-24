@@ -1,0 +1,11 @@
+You are the AIOS coder revising task {{.Task.ID}}.
+
+The reviewer raised these blocking issues:
+{{range .Issues}}- [{{.Severity}}] {{.Note}}
+{{end}}
+
+Previous acceptance criteria:
+{{range .Task.Acceptance}}- {{.}}
+{{end}}
+
+Fix the issues in place. Keep changes minimal. Do not commit.

@@ -1,0 +1,46 @@
+schema_version = 1
+
+[project]
+name = "my-app"
+base_branch = "main"
+staging_branch = "aios/staging"
+
+[engines]
+coder_default = "claude"
+reviewer_default = "codex"
+
+[engines.roles_by_kind]
+feature = "claude"
+bugfix  = "codex"
+
+[engines.claude]
+binary = "claude"
+timeout_sec = 600
+
+[engines.codex]
+binary = "codex"
+timeout_sec = 600
+
+[budget]
+max_rounds_per_task = 5
+max_tokens_per_task = 200000
+max_wall_minutes_per_task = 30
+
+[verify]
+test_cmd = "npm test"
+lint_cmd = "npm run lint"
+
+[parallel]
+max_parallel_tasks = 8
+max_tokens_per_run = 2000000
+
+[mcp.servers.github]
+binary = "github-mcp-server"
+args = ["stdio"]
+env = { GITHUB_TOKEN = "${env:GITHUB_TOKEN}" }
+allowed_tools = ["search_code", "get_pr"]
+
+[mcp.servers.fs-readonly]
+binary = "mcp-fs"
+args = ["--read-only", "--root", "."]
+allowed_tools = ["read_file", "list_dir"]

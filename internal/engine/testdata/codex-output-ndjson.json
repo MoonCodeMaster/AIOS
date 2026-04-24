@@ -1,0 +1,6 @@
+{"type":"reasoning","content":"thinking"}
+{"type":"response","content":"hello"}
+{"type":"response","content":" world"}
+{"type":"mcp_call","server":"github","tool":"search_code","args":{"q":"x"},"result":{"matches":1},"elapsed_ms":7}
+{"type":"usage","input_tokens":12,"output_tokens":4}
+{"type":"done"}

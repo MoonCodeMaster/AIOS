@@ -1,0 +1,226 @@
+package engine
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os/exec"
+)
+
+type CodexEngine struct {
+	Binary     string
+	ExtraArgs  []string
+	TimeoutSec int
+}
+
+func (c *CodexEngine) Name() string { return "codex" }
+
+func (c *CodexEngine) Invoke(ctx context.Context, req InvokeRequest) (*InvokeResponse, error) {
+	args := buildCodexArgs(req, c.ExtraArgs)
+	cmd := exec.CommandContext(ctx, c.Binary, args...)
+	if req.Workdir != "" {
+		cmd.Dir = req.Workdir
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("codex exec: %w (stderr: %s)", err, stderr.String())
+	}
+	resp, err := parseCodexOutput(stdout.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	resp.ExitCode = cmd.ProcessState.ExitCode()
+	return resp, nil
+}
+
+func buildCodexArgs(req InvokeRequest, extra []string) []string {
+	args := []string{"exec", "--json", req.Prompt}
+	if req.Workdir != "" {
+		args = append(args, "--cd", req.Workdir)
+	}
+	if req.Mcp != nil && req.Mcp.ConfigPath != "" {
+		args = append(args, "--mcp-config", req.Mcp.ConfigPath)
+	}
+	args = append(args, extra...)
+	return args
+}
+
+// codexSingleJSON is the post-T10 single-object format emitted by some Codex versions.
+type codexSingleJSON struct {
+	Type  string `json:"type"`
+	Text  string `json:"text"`
+	Usage struct {
+		TotalTokens int `json:"total_tokens"`
+	} `json:"usage"`
+}
+
+// codexEvent is one line of real Codex CLI NDJSON output.
+type codexEvent struct {
+	Type        string          `json:"type"`
+	Content     string          `json:"content"`
+	InputTokens int             `json:"input_tokens"`
+	OutputTokens int            `json:"output_tokens"`
+	Server      string          `json:"server"`
+	Tool        string          `json:"tool"`
+	Args        json.RawMessage `json:"args"`
+	Result      json.RawMessage `json:"result"`
+	ElapsedMs   int             `json:"elapsed_ms"`
+	Error       string          `json:"error"`
+}
+
+// isNDJSON reports whether raw contains multiple top-level JSON objects separated
+// by newlines. We split on newlines and check that at least two non-empty lines
+// each parse as valid JSON.
+func isNDJSON(raw []byte) bool {
+	lines := bytes.Split(raw, []byte("\n"))
+	count := 0
+	for _, line := range lines {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		if !json.Valid(line) {
+			return false
+		}
+		count++
+		if count >= 2 {
+			return true
+		}
+	}
+	return false
+}
+
+func parseCodexOutput(raw []byte) (*InvokeResponse, error) {
+	if isNDJSON(raw) {
+		return parseCodexOutputNDJSON(raw)
+	}
+	return parseCodexOutputSingle(raw)
+}
+
+// parseCodexOutputNDJSON handles real Codex CLI NDJSON streaming output.
+func parseCodexOutputNDJSON(raw []byte) (*InvokeResponse, error) {
+	var text string
+	var tokens int
+	var mcpCalls []McpCall
+
+	lines := bytes.Split(raw, []byte("\n"))
+	for _, line := range lines {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var ev codexEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			return nil, fmt.Errorf("codex ndjson parse: %w", err)
+		}
+		switch ev.Type {
+		case "response":
+			text += ev.Content
+		case "usage":
+			tokens += ev.InputTokens + ev.OutputTokens
+		case "mcp_call":
+			mcpCalls = append(mcpCalls, McpCall{
+				Server:     ev.Server,
+				Tool:       ev.Tool,
+				ArgsJSON:   ev.Args,
+				ResultJSON: ev.Result,
+				DurationMs: ev.ElapsedMs,
+				Error:      ev.Error,
+			})
+		}
+	}
+	return &InvokeResponse{
+		Raw:         string(raw),
+		Text:        text,
+		UsageTokens: tokens,
+		McpCalls:    mcpCalls,
+	}, nil
+}
+
+// parseCodexOutputSingle handles the post-T10 single-object JSON format.
+func parseCodexOutputSingle(raw []byte) (*InvokeResponse, error) {
+	var j codexSingleJSON
+	if err := json.Unmarshal(raw, &j); err != nil {
+		return nil, fmt.Errorf("codex output parse: %w", err)
+	}
+	return &InvokeResponse{
+		Raw:         string(raw),
+		Text:        j.Text,
+		UsageTokens: j.Usage.TotalTokens,
+		McpCalls:    parseCodexMcpCallsLocal(raw),
+	}, nil
+}
+
+// parseCodexMcpCallsLocal mirrors internal/mcp/parse.go's ParseCodexMcpCalls
+// to avoid an engine -> mcp -> engine import cycle.
+// It handles both single-object and NDJSON formats.
+func parseCodexMcpCallsLocal(raw []byte) []McpCall {
+	if isNDJSON(raw) {
+		return parseCodexMcpCallsNDJSON(raw)
+	}
+	return parseCodexMcpCallsSingle(raw)
+}
+
+// parseCodexMcpCallsSingle extracts MCP calls from a single-object JSON document.
+func parseCodexMcpCallsSingle(raw []byte) []McpCall {
+	var doc struct {
+		MCPCalls []struct {
+			Server    string          `json:"server"`
+			Tool      string          `json:"tool"`
+			Args      json.RawMessage `json:"args"`
+			Result    json.RawMessage `json:"result"`
+			ElapsedMs int             `json:"elapsed_ms"`
+			Error     string          `json:"error"`
+		} `json:"mcp_calls"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil
+	}
+	out := make([]McpCall, 0, len(doc.MCPCalls))
+	for _, mc := range doc.MCPCalls {
+		out = append(out, McpCall{
+			Server:     mc.Server,
+			Tool:       mc.Tool,
+			ArgsJSON:   mc.Args,
+			ResultJSON: mc.Result,
+			DurationMs: mc.ElapsedMs,
+			Error:      mc.Error,
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// parseCodexMcpCallsNDJSON extracts MCP calls from NDJSON streaming output.
+func parseCodexMcpCallsNDJSON(raw []byte) []McpCall {
+	var out []McpCall
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var ev codexEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			continue
+		}
+		if ev.Type == "mcp_call" {
+			out = append(out, McpCall{
+				Server:     ev.Server,
+				Tool:       ev.Tool,
+				ArgsJSON:   ev.Args,
+				ResultJSON: ev.Result,
+				DurationMs: ev.ElapsedMs,
+				Error:      ev.Error,
+			})
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}

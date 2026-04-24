@@ -1,0 +1,14 @@
+{
+  "type": "final",
+  "text": "Done.",
+  "usage": { "total_tokens": 250 },
+  "mcp_calls": [
+    {
+      "server": "github",
+      "tool": "search_code",
+      "args": { "q": "func login" },
+      "result": { "matches": 3 },
+      "elapsed_ms": 42
+    }
+  ]
+}

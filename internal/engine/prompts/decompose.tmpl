@@ -1,0 +1,9 @@
+You are AIOS. Decompose this spec into ordered tasks.
+
+SPEC:
+{{.Spec}}
+
+Output one markdown file per task, each separated by a line "===TASK==="
+with YAML frontmatter (id, kind, depends_on, status, acceptance) + short
+description. Kind is one of: feature, scaffold, greenfield, bugfix,
+refactor, test-writing. IDs are NNN-slug (zero-padded, sequential).

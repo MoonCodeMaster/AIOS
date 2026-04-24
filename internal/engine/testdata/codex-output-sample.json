@@ -1,0 +1,5 @@
+{
+  "type": "final",
+  "text": "hello world",
+  "usage": { "total_tokens": 16 }
+}

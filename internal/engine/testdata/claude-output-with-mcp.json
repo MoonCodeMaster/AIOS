@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "result": "I searched the repo and edited login.go.",
+  "usage": { "input_tokens": 100, "output_tokens": 50 },
+  "tool_calls": [
+    {
+      "name": "mcp__github__search_code",
+      "input": { "q": "func login" },
+      "output": { "matches": 3 },
+      "duration_ms": 42
+    },
+    {
+      "name": "mcp__fs-readonly__read_file",
+      "input": { "path": "auth/login.go" },
+      "output": { "content": "package auth..." },
+      "duration_ms": 8
+    }
+  ]
+}
