@@ -1,0 +1,6 @@
+bin/
+.DS_Store
+Reference/
+
+.aios/worktrees/
+.aios/runs/*/*/round-*/verify.json.tmp
