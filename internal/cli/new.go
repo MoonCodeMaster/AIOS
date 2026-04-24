@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Solaxis/aios/internal/config"
-	"github.com/Solaxis/aios/internal/engine"
-	"github.com/Solaxis/aios/internal/engine/prompts"
-	"github.com/Solaxis/aios/internal/run"
+	"github.com/MoonCodeMaster/AIOS/internal/config"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/engine/prompts"
+	"github.com/MoonCodeMaster/AIOS/internal/run"
 	"github.com/spf13/cobra"
 )
 

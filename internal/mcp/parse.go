@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Solaxis/aios/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
 )
 
 // ParseClaudeMcpCalls extracts MCP tool calls from Claude CLI JSON output.

@@ -9,9 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Solaxis/aios/internal/config"
-	"github.com/Solaxis/aios/internal/engine"
-	"github.com/Solaxis/aios/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/config"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
 )
 
 type Manager struct {

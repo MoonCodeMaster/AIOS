@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Solaxis/aios/internal/engine"
-	"github.com/Solaxis/aios/internal/spec"
-	"github.com/Solaxis/aios/internal/verify"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/verify"
 )
 
 // reviewerApproveJSON is a canned reviewer response in the structured format

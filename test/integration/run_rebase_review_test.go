@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Solaxis/aios/internal/engine"
-	"github.com/Solaxis/aios/internal/orchestrator"
-	"github.com/Solaxis/aios/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/orchestrator"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
 )
 
 // setupRebaseReviewRepo creates a repo with shared.txt that has 5 lines.

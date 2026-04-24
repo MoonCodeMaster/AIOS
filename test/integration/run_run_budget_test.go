@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Solaxis/aios/internal/orchestrator"
+	"github.com/MoonCodeMaster/AIOS/internal/orchestrator"
 )
 
 func TestRunBudgetCancelsContext(t *testing.T) {

@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Solaxis/aios/internal/engine"
-	"github.com/Solaxis/aios/internal/orchestrator"
-	"github.com/Solaxis/aios/internal/run"
-	"github.com/Solaxis/aios/internal/spec"
-	"github.com/Solaxis/aios/internal/verify"
-	"github.com/Solaxis/aios/internal/worktree"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/orchestrator"
+	"github.com/MoonCodeMaster/AIOS/internal/run"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/verify"
+	"github.com/MoonCodeMaster/AIOS/internal/worktree"
 )
 
 // Drives the live orchestrator + worktree manager with FakeEngines.

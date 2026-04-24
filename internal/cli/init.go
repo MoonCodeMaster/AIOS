@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/Solaxis/aios/internal/config"
-	"github.com/Solaxis/aios/internal/verify/detect"
+	"github.com/MoonCodeMaster/AIOS/internal/config"
+	"github.com/MoonCodeMaster/AIOS/internal/verify/detect"
 	"github.com/spf13/cobra"
 )
 

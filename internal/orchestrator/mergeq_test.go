@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Solaxis/aios/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
 )
 
 // gitInit creates a fresh repo with a single commit on `main` and an

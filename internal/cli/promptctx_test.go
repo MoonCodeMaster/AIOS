@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Solaxis/aios/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
 )
 
 func TestIsTestFile(t *testing.T) {

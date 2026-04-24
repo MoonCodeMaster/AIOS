@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Solaxis/aios/internal/engine"
-	"github.com/Solaxis/aios/internal/orchestrator"
-	"github.com/Solaxis/aios/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/orchestrator"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
 )
 
 // TestRunAllParallelRealWorktrees proves that Workers=2+ is safe when each task

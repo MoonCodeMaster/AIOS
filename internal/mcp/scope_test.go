@@ -7,8 +7,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/Solaxis/aios/internal/config"
-	"github.com/Solaxis/aios/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/config"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
 )
 
 func TestScopeAllowedSubset(t *testing.T) {

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Solaxis/aios/internal/engine"
-	"github.com/Solaxis/aios/internal/orchestrator"
-	"github.com/Solaxis/aios/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/orchestrator"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
 )
 
 // Two sequential tasks (Workers=1) edit DIFFERENT files. Because the MergeQueue

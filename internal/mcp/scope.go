@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/Solaxis/aios/internal/config"
-	"github.com/Solaxis/aios/internal/engine"
-	"github.com/Solaxis/aios/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/config"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
 )
 
 // claudeMcpConfig is the on-disk shape Claude CLI expects via --mcp-config.

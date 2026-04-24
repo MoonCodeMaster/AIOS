@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Solaxis/aios/internal/engine"
-	"github.com/Solaxis/aios/internal/spec"
-	"github.com/Solaxis/aios/internal/verify"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/verify"
 )
 
 // defaultStallThreshold is the number of consecutive review rounds with an

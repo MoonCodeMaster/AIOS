@@ -28,7 +28,7 @@ For the optional end-to-end suite you additionally need authenticated
 `claude` and `codex` CLIs — see [`docs/e2e-setup.md`](docs/e2e-setup.md).
 
 ```bash
-git clone https://github.com/Solaxis/aios.git
+git clone https://github.com/MoonCodeMaster/AIOS.git
 cd aios
 make build        # produces ./bin/aios
 make test         # unit + internal package tests

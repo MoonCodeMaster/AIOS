@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Solaxis/aios/internal/engine"
-	"github.com/Solaxis/aios/internal/orchestrator"
-	"github.com/Solaxis/aios/internal/spec"
-	"github.com/Solaxis/aios/internal/verify"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/orchestrator"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/verify"
 )
 
 func TestRunBlocked_MaxRoundsExceeded(t *testing.T) {

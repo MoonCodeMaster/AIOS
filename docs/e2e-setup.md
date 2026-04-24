@@ -180,4 +180,4 @@ The nightly workflow at `.github/workflows/e2e.yml` runs on a schedule
 - Sets `AIOS_BIN=$(pwd)/bin/aios` and `AIOS_E2E=1`
 - Expects `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` as repository secrets
 
-It does not run on forks (`github.repository_owner == 'Solaxis'` guard).
+It does not run on forks (`github.repository_owner == 'MoonCodeMaster'` guard).

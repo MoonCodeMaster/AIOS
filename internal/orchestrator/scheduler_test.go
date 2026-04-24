@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Solaxis/aios/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
 )
 
 func tk(id string, deps ...string) *spec.Task {

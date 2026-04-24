@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Solaxis/aios/internal/orchestrator"
-	"github.com/Solaxis/aios/internal/spec"
-	"github.com/Solaxis/aios/internal/verify"
+	"github.com/MoonCodeMaster/AIOS/internal/orchestrator"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/verify"
 )
 
 // projectContext is the static, per-task context handed to the coder/reviewer

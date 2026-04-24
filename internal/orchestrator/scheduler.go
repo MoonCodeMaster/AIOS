@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Solaxis/aios/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
 )
 
 type TaskID = string

@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/Solaxis/aios/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
 )
 
 type MergeRequest struct {

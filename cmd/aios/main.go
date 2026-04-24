@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/Solaxis/aios/internal/cli"
+	"github.com/MoonCodeMaster/AIOS/internal/cli"
 )
 
 func main() {

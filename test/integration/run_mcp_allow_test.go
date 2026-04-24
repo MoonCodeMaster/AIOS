@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Solaxis/aios/internal/config"
-	"github.com/Solaxis/aios/internal/mcp"
-	"github.com/Solaxis/aios/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/config"
+	"github.com/MoonCodeMaster/AIOS/internal/mcp"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
 )
 
 // trueBin returns the absolute path to the system "true" binary.

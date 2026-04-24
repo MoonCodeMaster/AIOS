@@ -1,4 +1,4 @@
-module github.com/Solaxis/aios
+module github.com/MoonCodeMaster/AIOS
 
 go 1.26.2
 

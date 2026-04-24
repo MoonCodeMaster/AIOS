@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Solaxis/aios/internal/config"
-	"github.com/Solaxis/aios/internal/spec"
+	"github.com/MoonCodeMaster/AIOS/internal/config"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
 )
 
 // makeStubBinary writes a script to dir that just sleeps until killed.
