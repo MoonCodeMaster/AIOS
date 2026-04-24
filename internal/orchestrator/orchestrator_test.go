@@ -158,6 +158,9 @@ func TestRun_MaxRounds_Blocked(t *testing.T) {
 	if outcome.Reason != "max_rounds_exceeded" {
 		t.Errorf("reason = %q", outcome.Reason)
 	}
+	if outcome.BlockReason == nil || outcome.BlockReason.Code != CodeMaxRoundsExceeded {
+		t.Errorf("BlockReason = %+v, want Code=%s", outcome.BlockReason, CodeMaxRoundsExceeded)
+	}
 }
 
 func TestRun_CoderInputCarriesPriorRound(t *testing.T) {
@@ -210,8 +213,21 @@ func TestRun_CoderInputCarriesPriorRound(t *testing.T) {
 	if !r2.IsRevision || r2.Round != 2 {
 		t.Errorf("round 2 IsRevision=%v Round=%d", r2.IsRevision, r2.Round)
 	}
-	if len(r2.Issues) != 1 || r2.Issues[0].Note != "fix the loop" {
-		t.Errorf("round 2 Issues = %+v", r2.Issues)
+	// Round 1 had both a reviewer-reported issue AND a red verify check, so
+	// round 2's coder must see the reviewer's note plus the synthetic
+	// verify-failure issue.
+	var sawReviewer, sawVerify bool
+	for _, i := range r2.Issues {
+		if i.Note == "fix the loop" {
+			sawReviewer = true
+		}
+		if strings.Contains(i.Note, "test_cmd") && strings.Contains(i.Note, "failed") {
+			sawVerify = true
+		}
+	}
+	if !sawReviewer || !sawVerify {
+		t.Errorf("round 2 Issues missing reviewer (%v) or synthetic verify (%v); got %+v",
+			sawReviewer, sawVerify, r2.Issues)
 	}
 	if r2.PrevDiff != "diff-from-round-1" {
 		t.Errorf("round 2 PrevDiff = %q, want diff-from-round-1", r2.PrevDiff)
@@ -249,6 +265,9 @@ func TestRun_StallDetected(t *testing.T) {
 	}
 	if !strings.HasPrefix(outcome.Reason, "stall_no_progress:") {
 		t.Errorf("reason = %q, want stall_no_progress prefix", outcome.Reason)
+	}
+	if outcome.BlockReason == nil || outcome.BlockReason.Code != CodeStallNoProgress {
+		t.Errorf("BlockReason = %+v, want Code=%s", outcome.BlockReason, CodeStallNoProgress)
 	}
 	if len(outcome.Rounds) != 3 {
 		t.Errorf("rounds = %d, want 3 (stall threshold)", len(outcome.Rounds))
@@ -312,6 +331,110 @@ func TestRun_PropagatesWorkdir(t *testing.T) {
 	}
 	if len(reviewer.Received) != 1 || reviewer.Received[0].Workdir != wt {
 		t.Errorf("reviewer Workdir = %q, want %q", reviewer.Received[0].Workdir, wt)
+	}
+}
+
+// TestRun_VerifyRedFeedsSyntheticIssues verifies that when verify is red,
+// the failing check shows up in the coder's next-round prompt as a blocking
+// issue even if the reviewer approved. Without this, a reviewer that
+// approves red code leaves the coder with zero feedback on round N+1.
+func TestRun_VerifyRedFeedsSyntheticIssues(t *testing.T) {
+	coder := &engine.FakeEngine{Name_: "claude",
+		Script: []engine.InvokeResponse{{Text: "r1"}, {Text: "r2"}}}
+	// Reviewer approves both rounds. The only reason round 2 happens is that
+	// verify is red in round 1 — our new logic must still advance the loop.
+	reviewer := &engine.FakeEngine{Name_: "codex",
+		Script: []engine.InvokeResponse{{Text: reviewerApproveJSON}, {Text: reviewerApproveJSON}}}
+
+	verifier := &seqVerifier{results: [][]verify.CheckResult{
+		{{Name: "test_cmd", Status: verify.StatusFailed, ExitCode: 1}},
+		{{Name: "test_cmd", Status: verify.StatusPassed}},
+	}}
+
+	var inputs []CoderInput
+	dep := &Deps{
+		Coder: coder, Reviewer: reviewer,
+		Verifier:    verifier,
+		RenderCoder: func(in CoderInput) string { inputs = append(inputs, in); return "stub" },
+		MaxRounds:   5, MaxTokens: 100000, MaxWall: time.Minute,
+	}
+	task := &spec.Task{ID: "t", Kind: "feature", Status: "pending", Acceptance: []string{"c1"}}
+
+	outcome, err := Run(context.Background(), task, dep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Final != StateConverged {
+		t.Fatalf("final = %s, want converged (round 2 verify is green)", outcome.Final)
+	}
+	if len(inputs) != 2 {
+		t.Fatalf("coder called %d times, want 2", len(inputs))
+	}
+	r2 := inputs[1]
+	if !r2.IsRevision {
+		t.Errorf("round 2 IsRevision = false, want true")
+	}
+	// Round 2's coder must see the synthetic issue for the failed check,
+	// even though the reviewer approved round 1.
+	found := false
+	for _, i := range r2.Issues {
+		if i.Severity == "blocking" && strings.Contains(i.Note, "test_cmd") && strings.Contains(i.Note, "failed") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("round 2 coder issues missing synthetic verify issue; got %+v", r2.Issues)
+	}
+	// Round-1 record should also contain the synthetic issue for audit.
+	if len(outcome.Rounds) < 1 {
+		t.Fatal("no rounds recorded")
+	}
+	r1rec := outcome.Rounds[0]
+	foundRec := false
+	for _, i := range r1rec.Review.Issues {
+		if strings.Contains(i.Note, "test_cmd") {
+			foundRec = true
+			break
+		}
+	}
+	if !foundRec {
+		t.Errorf("round 1 audit record missing synthetic verify issue; got %+v", r1rec.Review.Issues)
+	}
+}
+
+// TestRun_VerifyRedStallsInsteadOfLooping verifies that persistently red
+// verify with a reviewer that keeps approving converges to a stall block
+// (via the synthetic-issue fingerprint) instead of burning all rounds.
+func TestRun_VerifyRedStallsInsteadOfLooping(t *testing.T) {
+	coder := &engine.FakeEngine{Name_: "claude",
+		Script: []engine.InvokeResponse{{Text: "r1"}, {Text: "r2"}, {Text: "r3"}}}
+	reviewer := &engine.FakeEngine{Name_: "codex",
+		Script: []engine.InvokeResponse{
+			{Text: reviewerApproveJSON},
+			{Text: reviewerApproveJSON},
+			{Text: reviewerApproveJSON},
+		}}
+	// Same failure every round — fingerprint stable → stall after 3.
+	verifier := &stubVerifier{results: []verify.CheckResult{
+		{Name: "test_cmd", Status: verify.StatusFailed, ExitCode: 1},
+	}}
+	dep := &Deps{
+		Coder: coder, Reviewer: reviewer,
+		Verifier:  verifier,
+		MaxRounds: 10, MaxTokens: 1_000_000, MaxWall: time.Minute,
+	}
+	task := &spec.Task{ID: "t", Kind: "feature", Status: "pending", Acceptance: []string{"c1"}}
+
+	outcome, err := Run(context.Background(), task, dep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Final != StateBlocked {
+		t.Fatalf("final = %s, want blocked", outcome.Final)
+	}
+	if !strings.HasPrefix(outcome.Reason, "stall_no_progress") {
+		t.Errorf("reason = %q, want stall_no_progress prefix", outcome.Reason)
 	}
 }
 

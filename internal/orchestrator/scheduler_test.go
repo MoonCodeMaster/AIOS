@@ -53,7 +53,8 @@ func TestSchedulerBlockedTransitiveBlock(t *testing.T) {
 	if first[0] != "a" {
 		t.Fatal("expected a first")
 	}
-	s.Done(TaskResult{ID: "a", Status: "blocked", Reason: "x"})
+	s.Done(TaskResult{ID: "a", Status: "blocked", Reason: "x",
+		BlockReason: NewBlock(CodeStallNoProgress, "x")})
 	// Remaining tasks should never become ready.
 	more := drainReadyNonBlocking(s)
 	if len(more) != 0 {
@@ -61,6 +62,29 @@ func TestSchedulerBlockedTransitiveBlock(t *testing.T) {
 	}
 	if !s.AllSettled() {
 		t.Errorf("AllSettled() should be true after transitive block")
+	}
+
+	// The blocked map must record the real cause for 'a' and
+	// upstream_blocked pointers for every cascaded descendant.
+	blocked := s.Blocked()
+	if len(blocked) != 3 {
+		t.Fatalf("blocked = %v, want all three tasks recorded", blocked)
+	}
+	if got := blocked["a"]; got.Code != CodeStallNoProgress {
+		t.Errorf("a.Code = %s, want %s", got.Code, CodeStallNoProgress)
+	}
+	for _, id := range []string{"b", "c"} {
+		got := blocked[TaskID(id)]
+		if got.Code != CodeUpstreamBlocked {
+			t.Errorf("%s.Code = %s, want upstream_blocked", id, got.Code)
+		}
+		// b's upstream is a; c's upstream is b (nearest ancestor).
+	}
+	if blocked["b"].Upstream != "a" {
+		t.Errorf("b.Upstream = %q, want a", blocked["b"].Upstream)
+	}
+	if blocked["c"].Upstream != "b" {
+		t.Errorf("c.Upstream = %q, want b", blocked["c"].Upstream)
 	}
 }
 

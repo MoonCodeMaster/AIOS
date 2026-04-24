@@ -27,8 +27,17 @@ type MergeRequest struct {
 }
 
 type MergeResult struct {
-	Status string // "converged" | "blocked"
-	Reason string
+	Status      string // "converged" | "blocked"
+	Reason      string // deprecated: mirror of BlockReason.String()
+	BlockReason *BlockReason
+}
+
+// blockedMerge builds a blocked MergeResult whose Reason string mirrors the
+// new BlockReason.String() — the legacy field is still consumed by code
+// that has not been migrated.
+func blockedMerge(code BlockCode, detail string) MergeResult {
+	br := NewBlock(code, detail)
+	return MergeResult{Status: "blocked", Reason: br.String(), BlockReason: br}
 }
 
 type MergeQueue struct {
@@ -77,38 +86,38 @@ func (q *MergeQueue) Run(ctx context.Context) {
 func (q *MergeQueue) process(ctx context.Context, req MergeRequest) MergeResult {
 	stagingHead, err := q.gitOut(ctx, "rev-parse", q.stagingBranch)
 	if err != nil {
-		q.logSink(fmt.Sprintf("%s rev-parse-failed", req.TaskID))
-		return MergeResult{Status: "blocked", Reason: "rev-parse-failed"}
+		q.logSink(fmt.Sprintf("%s %s", req.TaskID, CodeRevParseFailed))
+		return blockedMerge(CodeRevParseFailed, "")
 	}
 	stagingHead = strings.TrimSpace(stagingHead)
 	if stagingHead == req.ParentSHA {
 		if err := q.git(ctx, "checkout", "-q", q.stagingBranch); err != nil {
-			return MergeResult{Status: "blocked", Reason: "checkout-staging-failed"}
+			return blockedMerge(CodeCheckoutStagingFailed, "")
 		}
 		if err := q.git(ctx, "merge", "--ff-only", req.Branch); err != nil {
-			q.logSink(fmt.Sprintf("%s ff-failed", req.TaskID))
-			return MergeResult{Status: "blocked", Reason: "ff-failed"}
+			q.logSink(fmt.Sprintf("%s %s", req.TaskID, CodeFFFailed))
+			return blockedMerge(CodeFFFailed, "")
 		}
 		q.logSink(fmt.Sprintf("%s ff-merged", req.TaskID))
 		return MergeResult{Status: "converged"}
 	}
 	// Rebase path: switch to task branch, rebase onto staging.
 	if err := q.git(ctx, "checkout", "-q", req.Branch); err != nil {
-		return MergeResult{Status: "blocked", Reason: "checkout-failed"}
+		return blockedMerge(CodeCheckoutFailed, "")
 	}
 	if err := q.git(ctx, "rebase", q.stagingBranch); err != nil {
 		_ = q.git(ctx, "rebase", "--abort")
 		_ = q.git(ctx, "checkout", "-q", q.stagingBranch)
-		q.logSink(fmt.Sprintf("%s rebase-conflict", req.TaskID))
-		return MergeResult{Status: "blocked", Reason: "rebase-conflict"}
+		q.logSink(fmt.Sprintf("%s %s", req.TaskID, CodeRebaseConflict))
+		return blockedMerge(CodeRebaseConflict, "")
 	}
 	newDiff, _ := q.gitOut(ctx, "diff", q.stagingBranch+"..HEAD")
 	if normalize(newDiff) != normalize(string(req.Diff)) && req.ReReview != nil {
 		approved, err := req.ReReview([]byte(newDiff))
 		if err != nil || !approved {
 			_ = q.git(ctx, "checkout", "-q", q.stagingBranch)
-			q.logSink(fmt.Sprintf("%s rebase-review-rejected", req.TaskID))
-			return MergeResult{Status: "blocked", Reason: "rebase-review-rejected"}
+			q.logSink(fmt.Sprintf("%s %s", req.TaskID, CodeRebaseReviewRejected))
+			return blockedMerge(CodeRebaseReviewRejected, "")
 		}
 	}
 	// Re-run verification on the rebased branch HEAD (currently checked out
@@ -119,19 +128,15 @@ func (q *MergeQueue) process(ctx context.Context, req MergeRequest) MergeResult 
 		passed, summary := req.ReVerify()
 		if !passed {
 			_ = q.git(ctx, "checkout", "-q", q.stagingBranch)
-			q.logSink(fmt.Sprintf("%s rebase-verify-failed", req.TaskID))
-			reason := "rebase-verify-failed"
-			if summary != "" {
-				reason = reason + ": " + summary
-			}
-			return MergeResult{Status: "blocked", Reason: reason}
+			q.logSink(fmt.Sprintf("%s %s", req.TaskID, CodeRebaseVerifyFailed))
+			return blockedMerge(CodeRebaseVerifyFailed, summary)
 		}
 	}
 	if err := q.git(ctx, "checkout", "-q", q.stagingBranch); err != nil {
-		return MergeResult{Status: "blocked", Reason: "checkout-staging-failed"}
+		return blockedMerge(CodeCheckoutStagingFailed, "")
 	}
 	if err := q.git(ctx, "merge", "--ff-only", req.Branch); err != nil {
-		return MergeResult{Status: "blocked", Reason: "ff-after-rebase-failed"}
+		return blockedMerge(CodeFFAfterRebaseFailed, "")
 	}
 	q.logSink(fmt.Sprintf("%s rebased-and-merged", req.TaskID))
 	return MergeResult{Status: "converged"}

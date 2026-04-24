@@ -86,7 +86,8 @@ type RoundRecord struct {
 
 type Outcome struct {
 	Final       State
-	Reason      string
+	Reason      string       // deprecated: mirror of BlockReason.String() when blocked
+	BlockReason *BlockReason // nil when converged; structured reason when blocked
 	Rounds      []RoundRecord
 	UsageTokens int
 }
@@ -113,9 +114,10 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 	var prevChecks []verify.CheckResult
 
 	for !TerminalStates[out.Final] {
-		if reason := b.ExceededReason(); reason != "" {
+		if br := budgetBlock(b); br != nil {
 			out.Final = StateBlocked
-			out.Reason = reason
+			out.BlockReason = br
+			out.Reason = br.String()
 			break
 		}
 		b.BumpRound()
@@ -142,11 +144,12 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 		b.AddTokens(cres.UsageTokens)
 		r.UsageTokens += cres.UsageTokens
 
-		if reason := b.ExceededReason(); reason != "" {
+		if br := budgetBlock(b); br != nil {
 			out.Rounds = append(out.Rounds, r)
 			out.UsageTokens = b.Tokens()
 			out.Final = StateBlocked
-			out.Reason = reason
+			out.BlockReason = br
+			out.Reason = br.String()
 			break
 		}
 
@@ -170,6 +173,17 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 		if err := json.Unmarshal([]byte(rres.Text), &rev); err != nil {
 			return nil, fmt.Errorf("reviewer JSON parse: %w", err)
 		}
+
+		// Fold verify failures into reviewer issues. When verify is red, the
+		// reviewer may miss it or (worse) approve anyway; synthesising blocking
+		// issues from the failed checks guarantees the next round's coder
+		// prompt shows the failures verbatim, and that the stall fingerprint
+		// reflects them so an endlessly-red verify converges to a structured
+		// block instead of looping on empty reviewer issues.
+		if !verify.AllGreen(r.Checks) {
+			synth := verifyFailureIssues(r.Checks)
+			rev.Issues = append(synth, rev.Issues...)
+		}
 		r.Review = rev
 		out.Rounds = append(out.Rounds, r)
 		out.UsageTokens = b.Tokens()
@@ -192,9 +206,11 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 		}
 		prevFP = fp
 		if stallCount >= stallThreshold {
+			br := NewBlock(CodeStallNoProgress,
+				fmt.Sprintf("%d consecutive rounds raised identical review issues", stallCount))
 			out.Final = StateBlocked
-			out.Reason = fmt.Sprintf("stall_no_progress: %d consecutive rounds raised identical review issues",
-				stallCount)
+			out.BlockReason = br
+			out.Reason = br.String()
 			break
 		}
 
@@ -214,6 +230,25 @@ func allSatisfied(cs []CriterionStatus) bool {
 		}
 	}
 	return true
+}
+
+// verifyFailureIssues returns a ReviewIssue for every check that did not
+// pass, so the downstream pipeline (next-round coder prompt + stall
+// fingerprint) sees failed verify as blocking feedback even when the
+// reviewer did not report it.
+func verifyFailureIssues(checks []verify.CheckResult) []ReviewIssue {
+	var out []ReviewIssue
+	for _, c := range checks {
+		switch c.Status {
+		case verify.StatusFailed, verify.StatusTimedOut:
+			out = append(out, ReviewIssue{
+				Severity: "blocking",
+				Category: "regression",
+				Note:     "verify check " + c.Name + " " + string(c.Status),
+			})
+		}
+	}
+	return out
 }
 
 // issueFingerprint reduces a ReviewResult to a stable string signature of
@@ -297,7 +332,11 @@ type RunAllOpts struct {
 
 type RunReport struct {
 	Converged []TaskID
-	Blocked   map[TaskID]string // id -> reason
+	// Blocked maps every blocked task ID (direct or transitive) to its
+	// structured BlockReason. Tasks that failed directly carry the concrete
+	// code (e.g. CodeMaxRoundsExceeded); tasks that were cascaded by the DAG
+	// carry CodeUpstreamBlocked with Upstream set to the triggering task.
+	Blocked map[TaskID]BlockReason
 }
 
 func RunAll(ctx context.Context, opts RunAllOpts) (*RunReport, error) {
@@ -333,7 +372,12 @@ func RunAll(ctx context.Context, opts RunAllOpts) (*RunReport, error) {
 		mq.Submit(*mreq)
 		mres := <-ack
 		if mres.Status == "blocked" {
-			return TaskResult{ID: id, Status: "blocked", Reason: mres.Reason}
+			return TaskResult{
+				ID:          id,
+				Status:      "blocked",
+				Reason:      mres.Reason,
+				BlockReason: mres.BlockReason,
+			}
 		}
 		// Merge succeeded — preserve the original status (typically "converged").
 		return res
@@ -344,11 +388,12 @@ func RunAll(ctx context.Context, opts RunAllOpts) (*RunReport, error) {
 		return nil, err
 	}
 
-	rep := &RunReport{Blocked: map[TaskID]string{}}
-	blocked := sched.Blocked()
+	rep := &RunReport{Blocked: map[TaskID]BlockReason{}}
+	for id, reason := range sched.Blocked() {
+		rep.Blocked[id] = reason
+	}
 	for _, t := range opts.Tasks {
-		if _, b := blocked[t.ID]; b {
-			rep.Blocked[t.ID] = "blocked"
+		if _, b := rep.Blocked[t.ID]; b {
 			continue
 		}
 		rep.Converged = append(rep.Converged, t.ID)

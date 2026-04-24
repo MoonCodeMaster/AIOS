@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -170,19 +171,19 @@ func runMain(cmd *cobra.Command, args []string) error {
 	taskFn := func(ctx context.Context, id orchestrator.TaskID) (orchestrator.TaskResult, *orchestrator.MergeRequest) {
 		tk, ok := taskByID[id]
 		if !ok {
-			return orchestrator.TaskResult{ID: id, Status: "blocked", Reason: "task-not-found"}, nil
+			return blockedTask(id, orchestrator.CodeTaskNotFound, ""), nil
 		}
 
 		// Capture staging HEAD before creating the worktree so the MergeQueue
 		// can detect whether a rebase is needed.
 		parentSHA, err := stagingSHA()
 		if err != nil {
-			return orchestrator.TaskResult{ID: id, Status: "blocked", Reason: "rev-parse-failed"}, nil
+			return blockedTask(id, orchestrator.CodeRevParseFailed, err.Error()), nil
 		}
 
 		wt, err := wm.Create(tk.ID, cfg.Project.StagingBranch)
 		if err != nil {
-			return orchestrator.TaskResult{ID: id, Status: "blocked", Reason: "worktree-add-failed: " + err.Error()}, nil
+			return blockedTask(id, orchestrator.CodeWorktreeAddFailed, err.Error()), nil
 		}
 		defer wm.Remove(wt) // best-effort; the branch is retained for inspection
 
@@ -191,7 +192,7 @@ func runMain(cmd *cobra.Command, args []string) error {
 		if mcpMgr != nil {
 			scope, err := mcpMgr.ScopeFor(tk, filepath.Join(rec.Root(), "task-"+tk.ID))
 			if err != nil {
-				return orchestrator.TaskResult{ID: id, Status: "blocked", Reason: "mcp-scope-failed: " + err.Error()}, nil
+				return blockedTask(id, orchestrator.CodeMcpScopeFailed, err.Error()), nil
 			}
 			mcpScope = scope
 		}
@@ -202,7 +203,7 @@ func runMain(cmd *cobra.Command, args []string) error {
 			cfg.Engines.CoderDefault, cfg.Engines.ReviewerDefault, engMap,
 		)
 		if err != nil {
-			return orchestrator.TaskResult{ID: id, Status: "blocked", Reason: "engine-pick-failed: " + err.Error()}, nil
+			return blockedTask(id, orchestrator.CodeEnginePickFailed, err.Error()), nil
 		}
 
 		// Wrap engines to auto-attach MCP scope to every Invoke call.
@@ -300,7 +301,7 @@ func runMain(cmd *cobra.Command, args []string) error {
 		fmt.Printf("→ task %s (%s)\n", tk.ID, tk.Kind)
 		outcome, err := orchestrator.Run(ctx, tk, dep)
 		if err != nil {
-			return orchestrator.TaskResult{ID: id, Status: "blocked", Reason: err.Error()}, nil
+			return blockedTask(id, orchestrator.CodeEngineInvokeFailed, err.Error()), nil
 		}
 
 		// Record every round's artefacts.
@@ -318,7 +319,12 @@ func runMain(cmd *cobra.Command, args []string) error {
 			_ = rec.WriteTaskFile(tk.ID, "report.md", []byte(run.RenderReport(rpt)))
 			_ = updateTaskFile(tk)
 			fmt.Printf("✗ task %s BLOCKED: %s\n", tk.ID, outcome.Reason)
-			return orchestrator.TaskResult{ID: id, Status: "blocked", Reason: outcome.Reason}, nil
+			return orchestrator.TaskResult{
+				ID:          id,
+				Status:      "blocked",
+				Reason:      outcome.Reason,
+				BlockReason: outcome.BlockReason,
+			}, nil
 		}
 
 		// Compute the diff for the MergeRequest BEFORE committing (the commit
@@ -328,10 +334,10 @@ func runMain(cmd *cobra.Command, args []string) error {
 		// Commit on the task branch.
 		g := &worktree.Git{Dir: wt.Path}
 		if _, err := g.Run("add", "-A"); err != nil {
-			return orchestrator.TaskResult{ID: id, Status: "blocked", Reason: "git-add-failed: " + err.Error()}, nil
+			return blockedTask(id, orchestrator.CodeGitAddFailed, err.Error()), nil
 		}
 		if _, err := g.Run("commit", "--allow-empty", "-m", "aios: converged task "+tk.ID); err != nil {
-			return orchestrator.TaskResult{ID: id, Status: "blocked", Reason: "commit-failed: " + err.Error()}, nil
+			return blockedTask(id, orchestrator.CodeCommitFailed, err.Error()), nil
 		}
 
 		// Recompute diff post-commit for the MergeRequest (HEAD..staging).
@@ -419,9 +425,46 @@ func runMain(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(rep.Blocked) > 0 {
+		printBlockSummary(rep)
 		os.Exit(2)
 	}
 	return nil
+}
+
+// blockedTask builds a TaskResult with both the legacy Reason string and the
+// structured BlockReason populated, so older consumers (reports, logs) see
+// the same payload as the new structured path.
+func blockedTask(id orchestrator.TaskID, code orchestrator.BlockCode, detail string) orchestrator.TaskResult {
+	br := orchestrator.NewBlock(code, detail)
+	return orchestrator.TaskResult{
+		ID:          id,
+		Status:      "blocked",
+		Reason:      br.String(),
+		BlockReason: br,
+	}
+}
+
+// printBlockSummary emits a final human-readable list of blocked tasks.
+// Direct blocks show their code and detail; cascaded blocks name the
+// root-cause upstream task so the user can see at a glance why downstream
+// work never ran.
+func printBlockSummary(rep *orchestrator.RunReport) {
+	fmt.Fprintf(os.Stderr, "\n%d task(s) blocked:\n", len(rep.Blocked))
+	ids := make([]string, 0, len(rep.Blocked))
+	for id := range rep.Blocked {
+		ids = append(ids, id)
+	}
+	// Sort for stable output — otherwise map iteration order leaks into CI
+	// logs and diffs.
+	sort.Strings(ids)
+	for _, id := range ids {
+		br := rep.Blocked[id]
+		if br.Code == orchestrator.CodeUpstreamBlocked && br.Upstream != "" {
+			fmt.Fprintf(os.Stderr, "  %s: upstream_blocked (root cause: %s)\n", id, br.Upstream)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "  %s: %s\n", id, br.String())
+	}
 }
 
 // mcpScopedEngine wraps an Engine, auto-attaching an McpScope to every Invoke

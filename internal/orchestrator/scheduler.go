@@ -10,9 +10,10 @@ import (
 type TaskID = string
 
 type TaskResult struct {
-	ID     TaskID
-	Status string // "converged" | "blocked"
-	Reason string
+	ID          TaskID
+	Status      string       // "converged" | "blocked"
+	Reason      string       // deprecated: mirror of BlockReason.String()
+	BlockReason *BlockReason // nil on success; populated on block
 }
 
 // Scheduler is the per-run DAG bookkeeper. It owns the ready channel that
@@ -27,10 +28,14 @@ type Scheduler struct {
 	inflight   int
 	settled    int
 	total      int
-	blocked    map[TaskID]struct{}
-	ready      chan TaskID
-	done       chan struct{} // closed once all tasks are settled (converged or blocked)
-	doneOnce   sync.Once
+	// blocked records the structured reason for every task that is either
+	// directly blocked (by its own worker) or transitively blocked (via the
+	// cascade). Cascade entries use CodeUpstreamBlocked with Upstream set to
+	// the nearest blocked ancestor.
+	blocked  map[TaskID]BlockReason
+	ready    chan TaskID
+	done     chan struct{} // closed once all tasks are settled (converged or blocked)
+	doneOnce sync.Once
 }
 
 func NewScheduler(tasks []*spec.Task) (*Scheduler, error) {
@@ -38,7 +43,7 @@ func NewScheduler(tasks []*spec.Task) (*Scheduler, error) {
 		pending:    map[TaskID]*spec.Task{},
 		deps:       map[TaskID]map[TaskID]struct{}{},
 		dependents: map[TaskID]map[TaskID]struct{}{},
-		blocked:    map[TaskID]struct{}{},
+		blocked:    map[TaskID]BlockReason{},
 		total:      len(tasks),
 		ready:      make(chan TaskID, len(tasks)),
 		done:       make(chan struct{}),
@@ -76,13 +81,20 @@ func NewScheduler(tasks []*spec.Task) (*Scheduler, error) {
 func (s *Scheduler) Ready() <-chan TaskID { return s.ready }
 
 // Done is called by a worker when a task completes (converged or blocked).
+// When the task is blocked, r.BlockReason is preserved in the scheduler's
+// blocked map; cascaded dependents get a CodeUpstreamBlocked reason that
+// names r.ID as the root cause.
 func (s *Scheduler) Done(r TaskResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inflight--
 	s.settled++
 	if r.Status == "blocked" {
-		s.blocked[r.ID] = struct{}{}
+		reason := BlockReason{Code: CodeEngineInvokeFailed, Detail: r.Reason}
+		if r.BlockReason != nil {
+			reason = *r.BlockReason
+		}
+		s.blocked[r.ID] = reason
 		s.cascadeBlockLocked(r.ID)
 	} else {
 		s.releaseDependentsLocked(r.ID)
@@ -127,20 +139,23 @@ func (s *Scheduler) cascadeBlockLocked(id TaskID) {
 	for dep := range s.dependents[id] {
 		if _, stillPending := s.pending[dep]; stillPending {
 			delete(s.pending, dep)
-			s.blocked[dep] = struct{}{}
+			s.blocked[dep] = BlockReason{Code: CodeUpstreamBlocked, Upstream: id}
 			s.settled++
 			s.cascadeBlockLocked(dep)
 		}
 	}
 }
 
-// Blocked returns the set of task IDs that are blocked (directly or transitively).
-func (s *Scheduler) Blocked() map[TaskID]struct{} {
+// Blocked returns the set of task IDs that are blocked (directly or
+// transitively), along with the structured reason for each. Cascaded entries
+// carry Code=CodeUpstreamBlocked with Upstream set to the nearest ancestor
+// that blocked directly.
+func (s *Scheduler) Blocked() map[TaskID]BlockReason {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make(map[TaskID]struct{}, len(s.blocked))
-	for k := range s.blocked {
-		out[k] = struct{}{}
+	out := make(map[TaskID]BlockReason, len(s.blocked))
+	for k, v := range s.blocked {
+		out[k] = v
 	}
 	return out
 }

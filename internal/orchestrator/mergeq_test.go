@@ -110,8 +110,11 @@ func TestMergeQueueRebaseConflictBlocks(t *testing.T) {
 	ack2 := make(chan MergeResult, 1)
 	q.Submit(MergeRequest{TaskID: "T2", Branch: "aios/task/T2", ParentSHA: parent, Diff: []byte("ignored"), Ack: ack2})
 	r := <-ack2
-	if r.Status != "blocked" || r.Reason != "rebase-conflict" {
-		t.Fatalf("expected blocked/rebase-conflict, got %s/%s", r.Status, r.Reason)
+	if r.Status != "blocked" || r.Reason != string(CodeRebaseConflict) {
+		t.Fatalf("expected blocked/%s, got %s/%s", CodeRebaseConflict, r.Status, r.Reason)
+	}
+	if r.BlockReason == nil || r.BlockReason.Code != CodeRebaseConflict {
+		t.Errorf("BlockReason = %+v, want Code=%s", r.BlockReason, CodeRebaseConflict)
 	}
 }
 
@@ -160,8 +163,14 @@ func TestMergeQueueRebaseVerifyFails(t *testing.T) {
 	if r.Status != "blocked" {
 		t.Fatalf("expected blocked, got %s", r.Status)
 	}
-	if !strings.HasPrefix(r.Reason, "rebase-verify-failed") {
-		t.Fatalf("reason = %q, want rebase-verify-failed prefix", r.Reason)
+	if !strings.HasPrefix(r.Reason, string(CodeRebaseVerifyFailed)) {
+		t.Fatalf("reason = %q, want %s prefix", r.Reason, CodeRebaseVerifyFailed)
+	}
+	if r.BlockReason == nil || r.BlockReason.Code != CodeRebaseVerifyFailed {
+		t.Errorf("BlockReason = %+v, want Code=%s", r.BlockReason, CodeRebaseVerifyFailed)
+	}
+	if r.BlockReason != nil && r.BlockReason.Detail != "test_cmd=failed" {
+		t.Errorf("BlockReason.Detail = %q, want test_cmd=failed", r.BlockReason.Detail)
 	}
 	if gitSHA(t, dir, "aios/staging") != stagingAfterT1 {
 		t.Errorf("staging advanced past T1 even though verify failed")
