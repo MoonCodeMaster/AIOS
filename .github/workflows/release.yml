@@ -120,6 +120,21 @@ jobs:
           name: npm-staged
           path: dist/npm
 
+      - name: Restore native binary execute bit
+        # actions/upload-artifact@v4 uses zip archives which do not preserve
+        # Unix file modes. The native binaries chmodded to 0755 by
+        # scripts/build-npm.mjs on the goreleaser runner arrive here as 0644,
+        # and `npm publish` would then ship them non-executable — breaking
+        # `aios --version` with EACCES on users' machines. Re-chmod every
+        # POSIX binary before pack/publish. The Windows .exe does not need
+        # +x on target hosts but we chmod anyway for symmetry on the runner.
+        run: |
+          set -euo pipefail
+          for f in $(find dist/npm -type f \( -name aios -o -name aios.exe \)); do
+            chmod +x "$f"
+            ls -l "$f"
+          done
+
       - name: Publish platform packages
         if: ${{ env.NPM_TOKEN != '' }}
         env:
