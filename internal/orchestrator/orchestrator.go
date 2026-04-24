@@ -14,11 +14,12 @@ import (
 	"github.com/Solaxis/aios/internal/verify"
 )
 
-// stallThreshold is the number of consecutive review rounds with an identical
-// issue fingerprint that triggers a "no progress" block. Three rounds is the
-// smallest window that reliably distinguishes "the model needs another pass"
-// from "the coder cannot resolve what the reviewer is asking for".
-const stallThreshold = 3
+// defaultStallThreshold is the number of consecutive review rounds with an
+// identical issue fingerprint that triggers a "no progress" block. Three
+// rounds is the smallest window that reliably distinguishes "the model needs
+// another pass" from "the coder cannot resolve what the reviewer is asking
+// for". Overridable per-run via Deps.StallThreshold.
+const defaultStallThreshold = 3
 
 type Deps struct {
 	Coder    engine.Engine
@@ -40,6 +41,15 @@ type Deps struct {
 	MaxRounds int
 	MaxTokens int
 	MaxWall   time.Duration
+
+	// StallThreshold overrides the package default (3) for "consecutive
+	// identical-fingerprint rounds that trigger stall detection". Zero = use
+	// the package default. Lower values fail faster on hopeless tasks.
+	StallThreshold int
+	// MaxEscalations is the number of hard-constraint retry rounds to run
+	// after stall detection fires before blocking. Zero disables escalation
+	// entirely (original pre-P0 behavior). A typical config value is 1.
+	MaxEscalations int
 }
 
 // CoderInput is the full per-round context handed to the RenderCoder callback.
@@ -54,6 +64,12 @@ type CoderInput struct {
 	Issues     []ReviewIssue        // reviewer issues from the prior round
 	PrevDiff   string               // diff the reviewer saw in the prior round
 	PrevChecks []verify.CheckResult // verify results from the prior round
+	// Escalated is true when this round is an escalation retry triggered by
+	// stall detection. Prompts rendered for escalated rounds surface the
+	// reviewer's outstanding issues as hard constraints that MUST each be
+	// addressed; the model is explicitly told that further repetition of
+	// the same pattern will block the task.
+	Escalated bool
 }
 
 type ReviewResult struct {
@@ -77,11 +93,19 @@ type ReviewIssue struct {
 }
 
 type RoundRecord struct {
-	N          int
-	CoderText  string
-	Review     ReviewResult
-	Checks     []verify.CheckResult
-	UsageTokens int
+	N           int
+	CoderPrompt string // prompt string sent to the coder engine this round
+	CoderText   string // assistant text extracted from the coder response
+	CoderRaw    string // full raw stdout from the coder CLI (audit trail)
+	// Escalated is true when this round was an escalation retry triggered by
+	// stall detection. The coder prompt for escalated rounds surfaces the
+	// reviewer's outstanding issues as hard constraints.
+	Escalated      bool
+	ReviewerPrompt string       // prompt string sent to the reviewer engine this round
+	ReviewerRaw    string       // full raw stdout from the reviewer CLI
+	Review         ReviewResult // parsed review verdict
+	Checks         []verify.CheckResult
+	UsageTokens    int
 }
 
 type Outcome struct {
@@ -105,6 +129,11 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 		d.Diff = func() (string, error) { return "", nil }
 	}
 	b := NewBudget(d.MaxRounds, d.MaxTokens, d.MaxWall)
+	stallThreshold := d.StallThreshold
+	if stallThreshold <= 0 {
+		stallThreshold = defaultStallThreshold
+	}
+	escalationsRemaining := d.MaxEscalations
 	out := &Outcome{Final: StatePlanning}
 	var issues []ReviewIssue
 	isRevision := false
@@ -112,6 +141,11 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 	stallCount := 0
 	var prevDiff string
 	var prevChecks []verify.CheckResult
+	// nextEscalated carries over the escalation flag from the stall-detection
+	// branch below into the next loop iteration's CoderInput, so the prompt
+	// renderer can surface reviewer issues as hard constraints for that one
+	// round. Reset automatically after use.
+	nextEscalated := false
 
 	for !TerminalStates[out.Final] {
 		if br := budgetBlock(b); br != nil {
@@ -121,7 +155,7 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 			break
 		}
 		b.BumpRound()
-		r := RoundRecord{N: b.Rounds()}
+		r := RoundRecord{N: b.Rounds(), Escalated: nextEscalated}
 
 		// --- coding ---
 		cp := d.RenderCoder(CoderInput{
@@ -131,7 +165,12 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 			Issues:     issues,
 			PrevDiff:   prevDiff,
 			PrevChecks: prevChecks,
+			Escalated:  nextEscalated,
 		})
+		// Consumed this round — do not carry the flag into the next iteration
+		// unless the stall-detection branch below fires again.
+		nextEscalated = false
+		r.CoderPrompt = cp
 		cres, err := d.Coder.Invoke(ctx, engine.InvokeRequest{
 			Role:    engine.RoleCoder,
 			Prompt:  cp,
@@ -141,6 +180,7 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 			return nil, fmt.Errorf("coder invoke: %w", err)
 		}
 		r.CoderText = cres.Text
+		r.CoderRaw = cres.Raw
 		b.AddTokens(cres.UsageTokens)
 		r.UsageTokens += cres.UsageTokens
 
@@ -159,6 +199,7 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 		// --- reviewing ---
 		diff, _ := d.Diff()
 		rp := d.RenderReviewer(task, diff, r.Checks)
+		r.ReviewerPrompt = rp
 		rres, err := d.Reviewer.Invoke(ctx, engine.InvokeRequest{
 			Role:    engine.RoleReviewer,
 			Prompt:  rp,
@@ -167,6 +208,7 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reviewer invoke: %w", err)
 		}
+		r.ReviewerRaw = rres.Raw
 		b.AddTokens(rres.UsageTokens)
 		r.UsageTokens += rres.UsageTokens
 		var rev ReviewResult
@@ -194,10 +236,17 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 			break
 		}
 
-		// --- stall detection ---
-		// If three consecutive review rounds raise an identical set of unmet
+		// --- stall detection & escalation ladder ---
+		// If N consecutive review rounds raise an identical set of unmet
 		// criteria + issues, the coder is not making the reviewer happy and
-		// further rounds will only burn tokens. Block with a structured reason.
+		// further normal rounds will only burn tokens. Before blocking, try
+		// up to MaxEscalations "hard-constraint retries" — rounds whose coder
+		// prompt surfaces the reviewer's outstanding issues as hard blockers
+		// that MUST each be addressed. If an escalation succeeds, the loop
+		// converges normally. If escalations are exhausted or disabled, block
+		// with a structured reason whose Detail carries a human-readable
+		// summary of the unresolved issues — so `aios status` / report
+		// renderers can show "why this needs a human" without further I/O.
 		fp := issueFingerprint(rev)
 		if fp != "" && fp == prevFP {
 			stallCount++
@@ -206,12 +255,24 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 		}
 		prevFP = fp
 		if stallCount >= stallThreshold {
-			br := NewBlock(CodeStallNoProgress,
-				fmt.Sprintf("%d consecutive rounds raised identical review issues", stallCount))
-			out.Final = StateBlocked
-			out.BlockReason = br
-			out.Reason = br.String()
-			break
+			if escalationsRemaining > 0 {
+				escalationsRemaining--
+				// Reset the counter so the escalated round gets a fresh
+				// stall window: if it produces NEW issues we treat that as
+				// progress; if it produces the SAME fingerprint we re-enter
+				// this branch with escalationsRemaining now 0 and block.
+				stallCount = 0
+				prevFP = ""
+				nextEscalated = true
+				// Fall through to the "carry forward" block below — the
+				// loop continues with an escalated next round.
+			} else {
+				br := NewBlock(CodeStallNoProgress, summarizeStall(stallCount, rev, d.MaxEscalations))
+				out.Final = StateBlocked
+				out.BlockReason = br
+				out.Reason = br.String()
+				break
+			}
 		}
 
 		issues = rev.Issues
@@ -249,6 +310,56 @@ func verifyFailureIssues(checks []verify.CheckResult) []ReviewIssue {
 		}
 	}
 	return out
+}
+
+// summarizeStall renders the human-readable block detail for a stall. It
+// records how many rounds raised the same fingerprint, how many escalation
+// retries were tried, and the top unresolved reviewer concerns (unmet
+// criteria + blocking issues) so downstream consumers — report renderer,
+// CLI summary, future auto-decompose — have enough structured context to
+// explain "why this task needs a human" without re-reading round files.
+func summarizeStall(stallCount int, rev ReviewResult, maxEscalations int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d consecutive rounds raised identical review issues", stallCount)
+	if maxEscalations > 0 {
+		fmt.Fprintf(&b, "; %d escalation(s) exhausted", maxEscalations)
+	}
+	var unmet []string
+	for _, c := range rev.Criteria {
+		if c.Status != "satisfied" {
+			if c.Reason != "" {
+				unmet = append(unmet, fmt.Sprintf("%s (%s)", c.ID, c.Reason))
+			} else {
+				unmet = append(unmet, c.ID)
+			}
+		}
+	}
+	if len(unmet) > 0 {
+		fmt.Fprintf(&b, "; unmet criteria: %s", strings.Join(unmet, ", "))
+	}
+	var blockers []string
+	for _, i := range rev.Issues {
+		if i.Severity == "blocking" {
+			note := i.Note
+			if i.File != "" {
+				note = i.File + ": " + note
+			}
+			blockers = append(blockers, note)
+		}
+	}
+	if len(blockers) > 0 {
+		// Cap at 5 so a reviewer that dumps 30 issues does not blow up the
+		// BlockReason detail field (which shows up in CLI output verbatim).
+		const max = 5
+		shown := blockers
+		suffix := ""
+		if len(shown) > max {
+			shown = shown[:max]
+			suffix = fmt.Sprintf(" (+%d more)", len(blockers)-max)
+		}
+		fmt.Fprintf(&b, "; blocking issues: %s%s", strings.Join(shown, " | "), suffix)
+	}
+	return b.String()
 }
 
 // issueFingerprint reduces a ReviewResult to a stable string signature of

@@ -4,7 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// taskBranchPrefix is the namespace this package owns inside the repo's refs.
+// Every aios-created worktree lives on a branch under this prefix; List and
+// PruneStale both use it as the filter that separates "ours" from "someone
+// else's worktrees" so GC never touches a user's own branches.
+const taskBranchPrefix = "aios/task/"
 
 type Worktree struct {
 	TaskID string
@@ -55,4 +62,73 @@ func (m *Manager) MergeFF(w *Worktree, target string) error {
 func (m *Manager) Diff(w *Worktree, fromBranch string) (string, error) {
 	g := &Git{Dir: m.RepoDir}
 	return g.Run("diff", fromBranch+".."+w.Branch)
+}
+
+// List returns every worktree in the repo that belongs to AIOS — identified
+// by a branch with the "aios/task/" prefix. Used by PruneStale at startup to
+// GC orphans left behind by a previous run that crashed or was SIGKILLed
+// before `defer Remove` could fire.
+//
+// The primary repo checkout (without a task branch) is excluded even if git
+// reports it, because removing it would wipe the user's working tree.
+func (m *Manager) List() ([]Worktree, error) {
+	g := &Git{Dir: m.RepoDir}
+	out, err := g.Run("worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	var wts []Worktree
+	var cur Worktree
+	flush := func() {
+		if cur.Path != "" && strings.HasPrefix(cur.Branch, taskBranchPrefix) {
+			cur.TaskID = strings.TrimPrefix(cur.Branch, taskBranchPrefix)
+			wts = append(wts, cur)
+		}
+		cur = Worktree{}
+	}
+	for _, ln := range strings.Split(out, "\n") {
+		ln = strings.TrimRight(ln, "\r")
+		if ln == "" {
+			flush()
+			continue
+		}
+		switch {
+		case strings.HasPrefix(ln, "worktree "):
+			cur.Path = strings.TrimPrefix(ln, "worktree ")
+		case strings.HasPrefix(ln, "branch "):
+			// git emits refs/heads/aios/task/<id>; normalize to a short branch
+			ref := strings.TrimPrefix(ln, "branch ")
+			cur.Branch = strings.TrimPrefix(ref, "refs/heads/")
+		}
+	}
+	flush()
+	return wts, nil
+}
+
+// PruneStale removes every aios-owned worktree in this repo. Safe to call at
+// startup of `aios run` — any aios/task/* worktree present at that moment is
+// by definition an orphan from a crashed/killed previous run, because AIOS
+// itself is not yet working on anything. Branches are preserved (never
+// deleted) so historical per-task work remains inspectable via
+// `git log aios/task/<id>`. Best-effort on per-worktree errors: continues
+// on failure and returns an aggregated error at the end.
+func (m *Manager) PruneStale() ([]Worktree, error) {
+	wts, err := m.List()
+	if err != nil {
+		return nil, err
+	}
+	var removed []Worktree
+	var errs []string
+	for _, w := range wts {
+		wt := w
+		if err := m.Remove(&wt); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", w.TaskID, err))
+			continue
+		}
+		removed = append(removed, wt)
+	}
+	if len(errs) > 0 {
+		return removed, fmt.Errorf("prune stale: %s", strings.Join(errs, "; "))
+	}
+	return removed, nil
 }

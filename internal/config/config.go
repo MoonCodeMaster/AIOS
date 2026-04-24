@@ -57,6 +57,19 @@ type Budget struct {
 	MaxRoundsPerTask      int `toml:"max_rounds_per_task"`
 	MaxTokensPerTask      int `toml:"max_tokens_per_task"`
 	MaxWallMinutesPerTask int `toml:"max_wall_minutes_per_task"`
+	// StallThreshold is the number of consecutive review rounds with an
+	// identical issue fingerprint that triggers stall detection. Default 3.
+	// Lower values converge faster on hopeless tasks at the cost of ending
+	// borderline cases that might have resolved in one more round.
+	StallThreshold int `toml:"stall_threshold"`
+	// MaxEscalations is the number of "hard-constraint retry" rounds the
+	// orchestrator will run after stall detection fires, before blocking
+	// with stall_no_progress. Each escalation re-runs the coder with a
+	// prompt that surfaces the reviewer's outstanding issues as hard
+	// constraints. Default 1 when unset. Set to 0 in config to disable
+	// escalation entirely (strict pre-P0 behavior). Pointer is used so
+	// "0" (disable) is distinguishable from "unset" (→ default 1).
+	MaxEscalations *int `toml:"max_escalations"`
 }
 
 type Verify struct {
@@ -129,6 +142,17 @@ func (p Parallel) RunTokenCap() int {
 	return *p.MaxTokensPerRun
 }
 
+// Escalations returns the configured MaxEscalations value, resolving the
+// unset case to the default (1). Callers should use this instead of
+// dereferencing Budget.MaxEscalations directly so the default is applied
+// consistently even when configuration pre-dates the field.
+func (b Budget) Escalations() int {
+	if b.MaxEscalations == nil {
+		return 1
+	}
+	return *b.MaxEscalations
+}
+
 var envRefRE = regexp.MustCompile(`\$\{env:([A-Z_][A-Z0-9_]*)\}`)
 
 func interpolateEnv(s string) string {
@@ -197,6 +221,13 @@ func applyDefaults(c *Config) {
 	}
 	if c.Budget.MaxWallMinutesPerTask == 0 {
 		c.Budget.MaxWallMinutesPerTask = 30
+	}
+	if c.Budget.StallThreshold == 0 {
+		c.Budget.StallThreshold = 3
+	}
+	if c.Budget.MaxEscalations == nil {
+		n := 1
+		c.Budget.MaxEscalations = &n
 	}
 	if c.Runtime.WorktreeRoot == "" {
 		c.Runtime.WorktreeRoot = ".aios/worktrees"

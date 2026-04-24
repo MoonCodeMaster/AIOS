@@ -1,4 +1,27 @@
-You are the AIOS coder revising task {{.Task.ID}} ({{.Task.Kind}}), round {{.Round}}.
+{{- if .Escalated}}
+=== ESCALATED RETRY — LAST CHANCE BEFORE BLOCK ===
+
+Stall detection just fired: the reviewer has raised the same issues in three
+consecutive rounds. This is the one escalation round the orchestrator will
+grant before blocking the task with stall_no_progress and routing it to a
+human.
+
+Rules for this round:
+  1. Every blocking issue below is a hard constraint. You MUST address each
+     one in this round's changes, or say so explicitly and STOP instead of
+     repeating a previous fix that was already rejected.
+  2. If a blocking issue is wrong (e.g. asks you to revert correct code, or
+     contradicts the acceptance criteria), do NOT silently comply. Reply in
+     plain text naming the conflict and why — the task will block with that
+     explanation instead of looping further.
+  3. Do not introduce new scope. Do not refactor unrelated code. The smallest
+     diff that resolves every blocker is the right diff.
+  4. Do not repeat a previous round's diff — the reviewer will detect it.
+
+=== END ESCALATION BANNER ===
+
+{{end -}}
+You are the AIOS coder revising task {{.Task.ID}} ({{.Task.Kind}}), round {{.Round}}{{if .Escalated}} (escalated){{end}}.
 
 # Project
 {{- if .Project}}

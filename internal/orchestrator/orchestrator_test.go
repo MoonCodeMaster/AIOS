@@ -77,6 +77,55 @@ func (s *seqVerifier) Run() []verify.CheckResult {
 	return r
 }
 
+// TestRun_RecordsAuditTrail locks in that every round's RoundRecord carries
+// the prompt actually sent and the raw response actually received for both
+// coder and reviewer, so downstream persistence (CLI run recorder) can write
+// a complete audit trail of "what the model saw and said" without losing
+// information that only existed in memory.
+func TestRun_RecordsAuditTrail(t *testing.T) {
+	coder := &engine.FakeEngine{
+		Name_: "claude",
+		Script: []engine.InvokeResponse{
+			{Text: "coder text", Raw: "raw coder stdout", UsageTokens: 10},
+		},
+	}
+	reviewer := &engine.FakeEngine{
+		Name_: "codex",
+		Script: []engine.InvokeResponse{
+			{Text: reviewerApproveJSON, Raw: "raw reviewer stdout", UsageTokens: 10},
+		},
+	}
+	task := &spec.Task{ID: "audit", Kind: "feature", Status: "pending",
+		Acceptance: []string{"c1"}}
+	dep := &Deps{
+		Coder: coder, Reviewer: reviewer,
+		Verifier:       &stubVerifier{results: []verify.CheckResult{{Name: "t", Status: verify.StatusPassed}}},
+		RenderCoder:    func(in CoderInput) string { return "coder prompt v1" },
+		RenderReviewer: func(_ *spec.Task, _ string, _ []verify.CheckResult) string { return "reviewer prompt v1" },
+		MaxRounds:      5, MaxTokens: 10000, MaxWall: time.Minute,
+	}
+	out, err := Run(context.Background(), task, dep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Rounds) != 1 {
+		t.Fatalf("rounds = %d, want 1", len(out.Rounds))
+	}
+	r := out.Rounds[0]
+	if r.CoderPrompt != "coder prompt v1" {
+		t.Errorf("CoderPrompt = %q", r.CoderPrompt)
+	}
+	if r.CoderRaw != "raw coder stdout" {
+		t.Errorf("CoderRaw = %q", r.CoderRaw)
+	}
+	if r.ReviewerPrompt != "reviewer prompt v1" {
+		t.Errorf("ReviewerPrompt = %q", r.ReviewerPrompt)
+	}
+	if r.ReviewerRaw != "raw reviewer stdout" {
+		t.Errorf("ReviewerRaw = %q", r.ReviewerRaw)
+	}
+}
+
 func TestRun_RejectThenConverge(t *testing.T) {
 	rejectJSON := `{"approved":false,"criteria":[{"id":"c1","status":"unmet"}],"issues":[{"severity":"blocking","note":"fix c1"}]}`
 	approveJSON := reviewerApproveJSON
@@ -271,6 +320,136 @@ func TestRun_StallDetected(t *testing.T) {
 	}
 	if len(outcome.Rounds) != 3 {
 		t.Errorf("rounds = %d, want 3 (stall threshold)", len(outcome.Rounds))
+	}
+}
+
+// TestRun_EscalatesThenConverges verifies the escalation ladder: after
+// stallThreshold identical rejections, the orchestrator must try one more
+// round with CoderInput.Escalated=true before blocking. If the escalated
+// round succeeds (reviewer approves) the task converges normally.
+func TestRun_EscalatesThenConverges(t *testing.T) {
+	rejectJSON := `{"approved":false,"criteria":[{"id":"c1","status":"unmet"}],"issues":[{"severity":"blocking","note":"still broken"}]}`
+
+	coder := &engine.FakeEngine{Name_: "claude",
+		Script: []engine.InvokeResponse{
+			{Text: "r1"}, {Text: "r2"}, {Text: "r3"}, {Text: "r4-escalated"},
+		}}
+	reviewer := &engine.FakeEngine{Name_: "codex",
+		Script: []engine.InvokeResponse{
+			{Text: rejectJSON},         // round 1 — stall counter=1
+			{Text: rejectJSON},         // round 2 — stall counter=2
+			{Text: rejectJSON},         // round 3 — stall counter=3, escalation triggers
+			{Text: reviewerApproveJSON}, // round 4 (escalated) — approves
+		}}
+
+	var inputs []CoderInput
+	dep := &Deps{
+		Coder: coder, Reviewer: reviewer,
+		Verifier:       &stubVerifier{results: []verify.CheckResult{{Name: "t", Status: verify.StatusPassed}}},
+		RenderCoder:    func(in CoderInput) string { inputs = append(inputs, in); return "prompt" },
+		MaxRounds:      10,
+		MaxTokens:      1_000_000,
+		MaxWall:        time.Minute,
+		StallThreshold: 3,
+		MaxEscalations: 1,
+	}
+	task := &spec.Task{ID: "esc", Kind: "feature", Status: "pending",
+		Acceptance: []string{"c1"}}
+
+	outcome, err := Run(context.Background(), task, dep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Final != StateConverged {
+		t.Fatalf("final = %s, want converged (escalation should rescue)", outcome.Final)
+	}
+	if len(outcome.Rounds) != 4 {
+		t.Fatalf("rounds = %d, want 4 (3 normal + 1 escalated)", len(outcome.Rounds))
+	}
+	// Only round 4 (index 3) should carry the escalated flag.
+	for i, r := range outcome.Rounds {
+		wantEsc := i == 3
+		if r.Escalated != wantEsc {
+			t.Errorf("round %d Escalated=%v, want %v", i+1, r.Escalated, wantEsc)
+		}
+	}
+	// The CoderInput for round 4 must also carry Escalated=true so the
+	// template can switch to the hard-constraint prompt shape.
+	if len(inputs) != 4 {
+		t.Fatalf("RenderCoder calls = %d, want 4", len(inputs))
+	}
+	if inputs[3].Escalated != true {
+		t.Errorf("round 4 CoderInput.Escalated = false, want true")
+	}
+	// Rounds 1-3 must NOT be marked escalated in their CoderInput.
+	for i := 0; i < 3; i++ {
+		if inputs[i].Escalated {
+			t.Errorf("round %d CoderInput.Escalated = true, want false", i+1)
+		}
+	}
+}
+
+// TestRun_EscalationExhaustedBlocksWithSummary verifies that when an
+// escalated round fails to resolve the same issues, the task blocks with
+// CodeStallNoProgress and the BlockReason.Detail carries a human-readable
+// summary of unmet criteria + blocking issues (for P0 "needs-human" surface).
+func TestRun_EscalationExhaustedBlocksWithSummary(t *testing.T) {
+	rejectJSON := `{"approved":false,"criteria":[{"id":"c1","status":"unmet","reason":"null deref"},{"id":"c2","status":"unmet"}],"issues":[{"severity":"blocking","note":"missing null check","file":"foo.go"},{"severity":"nit","note":"style"}]}`
+
+	coder := &engine.FakeEngine{Name_: "claude",
+		Script: []engine.InvokeResponse{
+			{Text: "r1"}, {Text: "r2"}, {Text: "r3"},
+			{Text: "r4-escalated"}, {Text: "r5"}, {Text: "r6"},
+		}}
+	// Reviewer keeps rejecting with the SAME fingerprint — escalation does
+	// not help; the second stall window exhausts the single escalation.
+	reviewer := &engine.FakeEngine{Name_: "codex",
+		Script: []engine.InvokeResponse{
+			{Text: rejectJSON}, {Text: rejectJSON}, {Text: rejectJSON},
+			{Text: rejectJSON}, {Text: rejectJSON}, {Text: rejectJSON},
+		}}
+
+	dep := &Deps{
+		Coder: coder, Reviewer: reviewer,
+		Verifier:       &stubVerifier{results: []verify.CheckResult{{Name: "t", Status: verify.StatusPassed}}},
+		MaxRounds:      20,
+		MaxTokens:      1_000_000,
+		MaxWall:        time.Minute,
+		StallThreshold: 3,
+		MaxEscalations: 1,
+	}
+	task := &spec.Task{ID: "esc2", Kind: "feature", Status: "pending",
+		Acceptance: []string{"c1", "c2"}}
+
+	outcome, err := Run(context.Background(), task, dep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Final != StateBlocked {
+		t.Fatalf("final = %s, want blocked", outcome.Final)
+	}
+	if outcome.BlockReason == nil || outcome.BlockReason.Code != CodeStallNoProgress {
+		t.Fatalf("BlockReason = %+v, want Code=%s", outcome.BlockReason, CodeStallNoProgress)
+	}
+	detail := outcome.BlockReason.Detail
+	// Must mention unmet criteria IDs so a user or another agent can see
+	// which acceptance conditions drove the block.
+	if !strings.Contains(detail, "c1") || !strings.Contains(detail, "c2") {
+		t.Errorf("detail missing unmet criteria: %q", detail)
+	}
+	// Must mention at least one blocking issue (file-prefixed) so the
+	// reviewer's top concern surfaces in the block summary.
+	if !strings.Contains(detail, "foo.go") || !strings.Contains(detail, "missing null check") {
+		t.Errorf("detail missing blocking issue: %q", detail)
+	}
+	// Must mention escalation was exhausted.
+	if !strings.Contains(detail, "escalation") {
+		t.Errorf("detail missing escalation mention: %q", detail)
+	}
+	// Must burn approximately 3 + 1 + 3 = 7 rounds at most: 3 normal, 1
+	// escalated (retries once), and up to 3 more to re-hit stall.
+	if len(outcome.Rounds) > 7 {
+		t.Errorf("rounds = %d, want <= 7 (3 normal + 1 escalated + ≤3 post-escalation)", len(outcome.Rounds))
 	}
 }
 

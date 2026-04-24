@@ -158,6 +158,23 @@ func runMain(cmd *cobra.Command, args []string) error {
 
 	wm := &worktree.Manager{RepoDir: wd, Root: filepath.Join(wd, cfg.Runtime.WorktreeRoot)}
 
+	// Startup GC: any aios/task/* worktree that exists right now is an orphan
+	// from a previously crashed or killed run — we just started, so nothing
+	// live can own one yet. Remove them before creating fresh per-task
+	// worktrees, otherwise `git worktree add` collides on path or branch.
+	// Branches are preserved so historical work remains inspectable.
+	if removed, err := wm.PruneStale(); err != nil {
+		// Non-fatal: surface the diagnostic but continue. If a subsequent
+		// Create() still collides, that task will block with CodeWorktreeAddFailed.
+		fmt.Fprintf(os.Stderr, "warn: worktree GC reported %d removed, error: %v\n", len(removed), err)
+	} else if len(removed) > 0 {
+		ids := make([]string, 0, len(removed))
+		for _, w := range removed {
+			ids = append(ids, w.TaskID)
+		}
+		fmt.Printf("gc: removed %d orphan worktree(s): %s\n", len(removed), strings.Join(ids, ", "))
+	}
+
 	// stagingSHA shells out to get the current HEAD of the staging branch.
 	stagingSHA := func() (string, error) {
 		out, err := exec.Command("git", "-C", wd, "rev-parse", cfg.Project.StagingBranch).Output()
@@ -263,6 +280,7 @@ func runMain(cmd *cobra.Command, args []string) error {
 				PrevDiff:      in.PrevDiff,
 				PrevChecks:    in.PrevChecks,
 				Issues:        in.Issues,
+				Escalated:     in.Escalated,
 			})
 			if err != nil {
 				return fmt.Sprintf("coder-revise render error: %v\nTask: %s",
@@ -296,6 +314,8 @@ func runMain(cmd *cobra.Command, args []string) error {
 			MaxRounds:      maxRounds,
 			MaxTokens:      maxTokens,
 			MaxWall:        time.Duration(cfg.Budget.MaxWallMinutesPerTask) * time.Minute,
+			StallThreshold: cfg.Budget.StallThreshold,
+			MaxEscalations: cfg.Budget.Escalations(),
 		}
 
 		fmt.Printf("→ task %s (%s)\n", tk.ID, tk.Kind)
@@ -304,13 +324,22 @@ func runMain(cmd *cobra.Command, args []string) error {
 			return blockedTask(id, orchestrator.CodeEngineInvokeFailed, err.Error()), nil
 		}
 
-		// Record every round's artefacts.
+		// Record every round's artefacts. The prompt+raw response pair forms
+		// the primary audit trail: a future reader can reconstruct exactly what
+		// each model saw and said without re-running the pipeline.
 		for i, r := range outcome.Rounds {
+			_ = rec.WriteRoundFile(tk.ID, i+1, "coder.prompt.txt", []byte(r.CoderPrompt))
+			_ = rec.WriteRoundFile(tk.ID, i+1, "coder.response.raw", []byte(r.CoderRaw))
 			_ = rec.WriteRoundFile(tk.ID, i+1, "coder-text.txt", []byte(r.CoderText))
+			_ = rec.WriteRoundFile(tk.ID, i+1, "reviewer.prompt.txt", []byte(r.ReviewerPrompt))
+			_ = rec.WriteRoundFile(tk.ID, i+1, "reviewer.response.raw", []byte(r.ReviewerRaw))
 			jb, _ := json.MarshalIndent(r.Checks, "", "  ")
 			_ = rec.WriteRoundFile(tk.ID, i+1, "verify.json", jb)
 			jb2, _ := json.MarshalIndent(r.Review, "", "  ")
 			_ = rec.WriteRoundFile(tk.ID, i+1, "reviewer-response.json", jb2)
+			if r.Escalated {
+				_ = rec.WriteRoundFile(tk.ID, i+1, "escalated", []byte("true\n"))
+			}
 		}
 
 		if outcome.Final != orchestrator.StateConverged {
@@ -447,7 +476,9 @@ func blockedTask(id orchestrator.TaskID, code orchestrator.BlockCode, detail str
 // printBlockSummary emits a final human-readable list of blocked tasks.
 // Direct blocks show their code and detail; cascaded blocks name the
 // root-cause upstream task so the user can see at a glance why downstream
-// work never ran.
+// work never ran. Stall blocks carry a [NEEDS HUMAN] prefix so the user
+// can instantly tell which blocks require their attention vs. which are
+// mechanical (budget exhausted, git error) or cascaded from an upstream.
 func printBlockSummary(rep *orchestrator.RunReport) {
 	fmt.Fprintf(os.Stderr, "\n%d task(s) blocked:\n", len(rep.Blocked))
 	ids := make([]string, 0, len(rep.Blocked))
@@ -461,6 +492,10 @@ func printBlockSummary(rep *orchestrator.RunReport) {
 		br := rep.Blocked[id]
 		if br.Code == orchestrator.CodeUpstreamBlocked && br.Upstream != "" {
 			fmt.Fprintf(os.Stderr, "  %s: upstream_blocked (root cause: %s)\n", id, br.Upstream)
+			continue
+		}
+		if br.Code == orchestrator.CodeStallNoProgress {
+			fmt.Fprintf(os.Stderr, "  %s: [NEEDS HUMAN] %s\n", id, br.String())
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "  %s: %s\n", id, br.String())
@@ -578,6 +613,7 @@ func buildReport(task *spec.Task, o *orchestrator.Outcome) run.Report {
 			N: r.N, ReviewApproved: r.Review.Approved,
 			UnmetCriteria: unmet, IssueCount: len(r.Review.Issues),
 			VerifyGreen: verify.AllGreen(r.Checks),
+			Escalated:   r.Escalated,
 		})
 	}
 	return rpt

@@ -41,7 +41,9 @@ type coderData struct {
 
 // coderReviseData is the shape consumed by coder-revise.tmpl. It carries the
 // previous round's diff, verify results, and reviewer issues alongside the
-// static project context.
+// static project context. Escalated=true switches the template into its
+// hard-constraint mode: the prompt prepends a standout banner telling the
+// coder this is a last-chance retry triggered by stall detection.
 type coderReviseData struct {
 	Project       *spec.Project
 	Task          *spec.Task
@@ -51,6 +53,7 @@ type coderReviseData struct {
 	PrevDiff      string
 	PrevChecks    []verify.CheckResult
 	Issues        []orchestrator.ReviewIssue
+	Escalated     bool
 }
 
 // reviewerData is the shape consumed by reviewer.tmpl.

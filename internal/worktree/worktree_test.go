@@ -52,6 +52,77 @@ func TestWorktree_CreateAndRemove(t *testing.T) {
 	}
 }
 
+// TestWorktree_ListAndPruneStale verifies the GC helpers used by `aios run`
+// at startup to clean up worktrees left behind by a crashed/killed previous
+// run. A non-aios branch worktree in the same repo must not be touched.
+func TestWorktree_ListAndPruneStale(t *testing.T) {
+	repo := initRepo(t)
+	m := &Manager{RepoDir: repo, Root: filepath.Join(repo, ".aios", "worktrees")}
+
+	// Two aios-owned worktrees representing a crashed prior run.
+	w1, err := m.Create("task-a", "aios/staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w2, err := m.Create("task-b", "aios/staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A non-aios worktree the user might have created themselves. Must be
+	// invisible to List() and therefore survive PruneStale untouched.
+	otherDir := filepath.Join(repo, "other-wt")
+	if err := exec.Command("git", "-C", repo, "worktree", "add", "-b", "feature/user", otherDir, "aios/staging").Run(); err != nil {
+		t.Fatalf("create non-aios worktree: %v", err)
+	}
+
+	list, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("List returned %d aios worktrees, want 2: %+v", len(list), list)
+	}
+	byID := map[string]Worktree{}
+	for _, w := range list {
+		byID[w.TaskID] = w
+	}
+	if _, ok := byID["task-a"]; !ok {
+		t.Errorf("List missing task-a: %+v", list)
+	}
+	if _, ok := byID["task-b"]; !ok {
+		t.Errorf("List missing task-b: %+v", list)
+	}
+
+	removed, err := m.PruneStale()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 2 {
+		t.Errorf("PruneStale removed %d, want 2", len(removed))
+	}
+	if _, err := os.Stat(w1.Path); !os.IsNotExist(err) {
+		t.Errorf("task-a worktree still on disk: %v", err)
+	}
+	if _, err := os.Stat(w2.Path); !os.IsNotExist(err) {
+		t.Errorf("task-b worktree still on disk: %v", err)
+	}
+
+	// The user's own worktree must be untouched.
+	if _, err := os.Stat(otherDir); err != nil {
+		t.Errorf("non-aios worktree was pruned (it should not have been): %v", err)
+	}
+
+	// Branches must be preserved so history remains inspectable.
+	out, err := exec.Command("git", "-C", repo, "branch", "--list", "aios/task/task-a").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "aios/task/task-a") {
+		t.Errorf("task-a branch was deleted by PruneStale; want preserved. got: %q", string(out))
+	}
+}
+
 func TestWorktree_MergeFF(t *testing.T) {
 	repo := initRepo(t)
 	m := &Manager{RepoDir: repo, Root: filepath.Join(repo, ".aios", "worktrees")}

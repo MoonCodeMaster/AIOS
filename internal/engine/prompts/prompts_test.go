@@ -103,6 +103,51 @@ func TestRender_CoderRevise_CarriesPriorRound(t *testing.T) {
 	)
 }
 
+// TestRender_CoderRevise_Escalated verifies the escalation banner is
+// rendered above the normal revise content when Escalated=true, and omitted
+// when Escalated is false/unset, so non-escalated rounds do not carry the
+// "last chance" framing.
+func TestRender_CoderRevise_Escalated(t *testing.T) {
+	base := map[string]any{
+		"Project": map[string]any{"Name": "ToyApp", "Goal": "reverse argv"},
+		"Task": map[string]any{
+			"ID":         "001-a",
+			"Kind":       "feature",
+			"Acceptance": []string{"prints reversed args"},
+		},
+		"Workdir":  "/tmp/work/001-a",
+		"Round":    4,
+		"PrevDiff": "diff --git a/main.go b/main.go",
+		"Issues": []map[string]any{
+			{"Severity": "blocking", "Category": "correctness", "Note": "still broken"},
+		},
+	}
+	// Escalated = true renders the banner.
+	escBase := map[string]any{}
+	for k, v := range base {
+		escBase[k] = v
+	}
+	escBase["Escalated"] = true
+	outEsc, err := Render("coder-revise.tmpl", escBase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, outEsc,
+		"ESCALATED RETRY",
+		"LAST CHANCE BEFORE BLOCK",
+		"stall_no_progress",
+		"(escalated)",
+	)
+	// Escalated = false (or unset) must NOT render the banner.
+	outNormal, err := Render("coder-revise.tmpl", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(outNormal, "ESCALATED RETRY") {
+		t.Errorf("normal revise prompt should not carry the escalation banner")
+	}
+}
+
 func TestRender_Reviewer_StructuredSchema(t *testing.T) {
 	out, err := Render("reviewer.tmpl", map[string]any{
 		"Project": map[string]any{"Name": "ToyApp", "Goal": "reverse argv"},

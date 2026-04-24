@@ -20,6 +20,10 @@ type Round struct {
 	ReviewApproved bool
 	UnmetCriteria  []string
 	IssueCount     int
+	// Escalated marks rounds that ran as stall-detection escalation retries.
+	// Rendered into the report so an auditor can tell at a glance which
+	// rounds used the hard-constraint prompt path.
+	Escalated bool
 }
 
 func RenderReport(r Report) string {
@@ -31,7 +35,11 @@ func RenderReport(r Report) string {
 	fmt.Fprintf(&b, "**Total token usage:** %d\n\n", r.UsageTokens)
 	fmt.Fprintln(&b, "## Rounds")
 	for _, round := range r.Rounds {
-		fmt.Fprintf(&b, "\n### Round %d\n", round.N)
+		title := fmt.Sprintf("Round %d", round.N)
+		if round.Escalated {
+			title += " (escalated)"
+		}
+		fmt.Fprintf(&b, "\n### %s\n", title)
 		fmt.Fprintf(&b, "- diff lines: %d\n", round.DiffLines)
 		fmt.Fprintf(&b, "- verify green: %v\n", round.VerifyGreen)
 		fmt.Fprintf(&b, "- reviewer approved: %v\n", round.ReviewApproved)
