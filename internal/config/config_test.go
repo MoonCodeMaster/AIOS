@@ -123,6 +123,54 @@ func TestMCPServersEmptyByDefault(t *testing.T) {
 	}
 }
 
+func TestLoad_RejectsSameCoderAndReviewer(t *testing.T) {
+	const src = `schema_version = 1
+[engines]
+coder_default = "claude"
+reviewer_default = "claude"
+`
+	tmp := t.TempDir() + "/c.toml"
+	if err := os.WriteFile(tmp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(tmp)
+	if err == nil {
+		t.Fatal("expected error when coder_default == reviewer_default (single-model review forbidden)")
+	}
+}
+
+func TestLoad_RejectsUnknownEngineName(t *testing.T) {
+	const src = `schema_version = 1
+[engines]
+coder_default = "gpt-5"
+reviewer_default = "codex"
+`
+	tmp := t.TempDir() + "/c.toml"
+	if err := os.WriteFile(tmp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(tmp); err == nil {
+		t.Fatal("expected error for unknown engine name")
+	}
+}
+
+func TestLoad_RejectsUnknownRolesByKindEngine(t *testing.T) {
+	const src = `schema_version = 1
+[engines]
+coder_default = "claude"
+reviewer_default = "codex"
+[engines.roles_by_kind]
+feature = "gpt-5"
+`
+	tmp := t.TempDir() + "/c.toml"
+	if err := os.WriteFile(tmp, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(tmp); err == nil {
+		t.Fatal("expected error for unknown engine in roles_by_kind")
+	}
+}
+
 func TestMCPServerMissingBinaryRejected(t *testing.T) {
 	const src = `schema_version = 1
 [mcp.servers.foo]

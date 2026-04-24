@@ -100,6 +100,9 @@ func Load(path string) (*Config, error) {
 	if c.Parallel.MaxTokensPerRun != nil && *c.Parallel.MaxTokensPerRun < 1 {
 		return nil, fmt.Errorf("parallel.max_tokens_per_run must be >= 1, got %d", *c.Parallel.MaxTokensPerRun)
 	}
+	if err := validateCrossModelReview(&c.Engines); err != nil {
+		return nil, err
+	}
 	for name, srv := range c.MCP.Servers {
 		if srv.Binary == "" {
 			return nil, fmt.Errorf("mcp.servers.%s missing 'binary'", name)
@@ -133,6 +136,32 @@ func interpolateEnv(s string) string {
 		match := envRefRE.FindStringSubmatch(m)
 		return os.Getenv(match[1])
 	})
+}
+
+// validateCrossModelReview enforces that code and review are performed by
+// different engines. Self-review by the same model reliably misses the same
+// class of errors it just produced; this check fails closed so that a
+// misconfigured project cannot silently fall back to single-model review.
+func validateCrossModelReview(e *Engines) error {
+	if e.CoderDefault == e.ReviewerDefault {
+		return fmt.Errorf(
+			"engines.coder_default and engines.reviewer_default must be different engines "+
+				"(both are %q); cross-model review is mandatory so one engine's blind spots "+
+				"are caught by the other", e.CoderDefault)
+	}
+	known := map[string]bool{"claude": true, "codex": true}
+	if !known[e.CoderDefault] {
+		return fmt.Errorf("engines.coder_default %q is not a known engine (want claude|codex)", e.CoderDefault)
+	}
+	if !known[e.ReviewerDefault] {
+		return fmt.Errorf("engines.reviewer_default %q is not a known engine (want claude|codex)", e.ReviewerDefault)
+	}
+	for kind, coder := range e.RolesByKind {
+		if !known[coder] {
+			return fmt.Errorf("engines.roles_by_kind[%q] = %q is not a known engine (want claude|codex)", kind, coder)
+		}
+	}
+	return nil
 }
 
 func applyDefaults(c *Config) {
