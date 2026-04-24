@@ -5,12 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/Solaxis/aios/internal/engine"
 	"github.com/Solaxis/aios/internal/spec"
 	"github.com/Solaxis/aios/internal/verify"
 )
+
+// stallThreshold is the number of consecutive review rounds with an identical
+// issue fingerprint that triggers a "no progress" block. Three rounds is the
+// smallest window that reliably distinguishes "the model needs another pass"
+// from "the coder cannot resolve what the reviewer is asking for".
+const stallThreshold = 3
 
 type Deps struct {
 	Coder    engine.Engine
@@ -19,14 +27,33 @@ type Deps struct {
 		Run() []verify.CheckResult
 	}
 	// Prompt renderers are injected so tests don't need templates on disk.
-	RenderCoder   func(task *spec.Task, issues []ReviewIssue, isRevision bool) string
+	RenderCoder    func(in CoderInput) string
 	RenderReviewer func(task *spec.Task, diff string, checks []verify.CheckResult) string
 	// Diff is a callback returning the current diff for this task's worktree.
 	Diff func() (string, error)
 
+	// Workdir is the per-task worktree path. When non-empty it is passed to
+	// every engine invocation so the child CLI runs scoped to that directory
+	// instead of inheriting the AIOS process cwd.
+	Workdir string
+
 	MaxRounds int
 	MaxTokens int
 	MaxWall   time.Duration
+}
+
+// CoderInput is the full per-round context handed to the RenderCoder callback.
+// Fresh tasks get IsRevision=false and zero values for the Prev* fields;
+// revision rounds get the prior round's diff, verify results, and reviewer
+// issues so the prompt can show the coder its previous attempt and what the
+// reviewer pushed back on.
+type CoderInput struct {
+	Task       *spec.Task
+	IsRevision bool
+	Round      int                  // 1-indexed
+	Issues     []ReviewIssue        // reviewer issues from the prior round
+	PrevDiff   string               // diff the reviewer saw in the prior round
+	PrevChecks []verify.CheckResult // verify results from the prior round
 }
 
 type ReviewResult struct {
@@ -42,8 +69,11 @@ type CriterionStatus struct {
 }
 
 type ReviewIssue struct {
-	Severity string `json:"severity"`
+	Severity string `json:"severity"`           // "blocking" | "nit"
+	Category string `json:"category,omitempty"` // correctness | acceptance | regression | test-coverage | style | security | performance
 	Note     string `json:"note"`
+	File     string `json:"file,omitempty"`
+	Line     int    `json:"line,omitempty"`
 }
 
 type RoundRecord struct {
@@ -77,6 +107,10 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 	out := &Outcome{Final: StatePlanning}
 	var issues []ReviewIssue
 	isRevision := false
+	var prevFP string
+	stallCount := 0
+	var prevDiff string
+	var prevChecks []verify.CheckResult
 
 	for !TerminalStates[out.Final] {
 		if reason := b.ExceededReason(); reason != "" {
@@ -88,9 +122,18 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 		r := RoundRecord{N: b.Rounds()}
 
 		// --- coding ---
-		cp := d.RenderCoder(task, issues, isRevision)
+		cp := d.RenderCoder(CoderInput{
+			Task:       task,
+			IsRevision: isRevision,
+			Round:      b.Rounds(),
+			Issues:     issues,
+			PrevDiff:   prevDiff,
+			PrevChecks: prevChecks,
+		})
 		cres, err := d.Coder.Invoke(ctx, engine.InvokeRequest{
-			Role: engine.RoleCoder, Prompt: cp,
+			Role:    engine.RoleCoder,
+			Prompt:  cp,
+			Workdir: d.Workdir,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("coder invoke: %w", err)
@@ -114,7 +157,9 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 		diff, _ := d.Diff()
 		rp := d.RenderReviewer(task, diff, r.Checks)
 		rres, err := d.Reviewer.Invoke(ctx, engine.InvokeRequest{
-			Role: engine.RoleReviewer, Prompt: rp,
+			Role:    engine.RoleReviewer,
+			Prompt:  rp,
+			Workdir: d.Workdir,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("reviewer invoke: %w", err)
@@ -134,8 +179,29 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 			out.Final = StateConverged
 			break
 		}
+
+		// --- stall detection ---
+		// If three consecutive review rounds raise an identical set of unmet
+		// criteria + issues, the coder is not making the reviewer happy and
+		// further rounds will only burn tokens. Block with a structured reason.
+		fp := issueFingerprint(rev)
+		if fp != "" && fp == prevFP {
+			stallCount++
+		} else {
+			stallCount = 1
+		}
+		prevFP = fp
+		if stallCount >= stallThreshold {
+			out.Final = StateBlocked
+			out.Reason = fmt.Sprintf("stall_no_progress: %d consecutive rounds raised identical review issues",
+				stallCount)
+			break
+		}
+
 		issues = rev.Issues
 		isRevision = true
+		prevDiff = diff
+		prevChecks = r.Checks
 	}
 
 	return out, nil
@@ -150,11 +216,52 @@ func allSatisfied(cs []CriterionStatus) bool {
 	return true
 }
 
-func defaultCoderRender(task *spec.Task, issues []ReviewIssue, isRevision bool) string {
-	if !isRevision {
-		return fmt.Sprintf("Implement task %s. Acceptance: %v\n%s", task.ID, task.Acceptance, task.Body)
+// issueFingerprint reduces a ReviewResult to a stable string signature of
+// what the reviewer is unhappy about: unmet criteria IDs plus issue
+// (severity, note) pairs, sorted so order changes do not perturb it.
+// Returns "" when the reviewer raised nothing — that case is handled by
+// the convergence check, not the stall detector.
+func issueFingerprint(rev ReviewResult) string {
+	parts := make([]string, 0, len(rev.Criteria)+len(rev.Issues))
+	for _, c := range rev.Criteria {
+		if c.Status != "satisfied" {
+			parts = append(parts, "C:"+c.ID)
+		}
 	}
-	return fmt.Sprintf("Revise task %s. Reviewer issues: %v", task.ID, issues)
+	for _, i := range rev.Issues {
+		parts = append(parts, "I:"+i.Severity+":"+i.Note)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "|")
+}
+
+func defaultCoderRender(in CoderInput) string {
+	if !in.IsRevision {
+		return fmt.Sprintf("Implement task %s. Acceptance: %v\n%s",
+			in.Task.ID, in.Task.Acceptance, in.Task.Body)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Revise task %s (round %d).\n", in.Task.ID, in.Round)
+	fmt.Fprintf(&b, "Acceptance: %v\n", in.Task.Acceptance)
+	if len(in.PrevChecks) > 0 {
+		fmt.Fprintf(&b, "Prior verify results:\n")
+		for _, c := range in.PrevChecks {
+			fmt.Fprintf(&b, "  - %s: %s (exit %d)\n", c.Name, c.Status, c.ExitCode)
+		}
+	}
+	if len(in.Issues) > 0 {
+		fmt.Fprintf(&b, "Reviewer issues:\n")
+		for _, i := range in.Issues {
+			fmt.Fprintf(&b, "  - [%s] %s\n", i.Severity, i.Note)
+		}
+	}
+	if in.PrevDiff != "" {
+		fmt.Fprintf(&b, "Your prior attempt (diff):\n%s\n", in.PrevDiff)
+	}
+	return b.String()
 }
 
 func defaultReviewerRender(task *spec.Task, diff string, checks []verify.CheckResult) string {
