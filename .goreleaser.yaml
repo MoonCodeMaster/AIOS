@@ -7,20 +7,31 @@ builds:
     main: ./cmd/aios
     binary: aios
     env: [CGO_ENABLED=0]
-    goos:   [darwin, linux]
+    goos:   [darwin, linux, windows]
     goarch: [amd64, arm64]
+    # amd64 with GOAMD64=v1 keeps the binary runnable on the oldest x86-64
+    # hardware we care to support — higher levels (v2/v3) would exclude e.g.
+    # older CI runners and cheap VPS hosts where users try AIOS first.
+    goamd64: [v1]
+    # Windows on arm64 is not yet shipped; drop that combination so the
+    # npm platform list stays in sync with .goreleaser goos/goarch.
+    ignore:
+      - { goos: windows, goarch: arm64 }
     ldflags:
-      - -s -w -X github.com/Solaxis/aios/internal/cli.Version={{.Version}}
+      - -s -w -X github.com/MoonCodeMaster/AIOS/internal/cli.Version={{.Version}}
 
 archives:
   - id: tar
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
 
 checksum:
   name_template: "checksums.txt"
 
 release:
   github:
-    owner: Solaxis
-    name: aios
+    owner: MoonCodeMaster
+    name: AIOS

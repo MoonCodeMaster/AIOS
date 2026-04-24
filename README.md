@@ -90,13 +90,24 @@ npm install -g @anthropic-ai/claude-code    # provides `claude`
 npm install -g @openai/codex                # provides `codex`
 ```
 
-Install AIOS:
+Install AIOS (pick one):
 
 ```bash
-brew install Solaxis/aios/aios              # (after first release)
-# or
-go install github.com/Solaxis/aios/cmd/aios@latest
+# Recommended — same ergonomic as claude/codex above.
+npm install -g @mooncodemaster/aios
+
+# Alternatives:
+brew install MoonCodeMaster/aios/aios              # after first Homebrew tap release
+go install github.com/MoonCodeMaster/AIOS/cmd/aios@latest
 ```
+
+The `npm install` path ships the native `aios` binary. It uses the same
+platform-specific `optionalDependencies` pattern as `esbuild`, `biome`,
+`swc`, and `@openai/codex`: one tiny launcher plus five tiny sibling
+packages, one of which is auto-selected by npm's `os` / `cpu` fields. **No
+postinstall scripts. No network download during install.** See
+[`docs/npm-distribution.md`](docs/npm-distribution.md) if you need to
+troubleshoot `--no-optional`, air-gapped mirrors, or Windows on ARM.
 
 ## Quick start
 

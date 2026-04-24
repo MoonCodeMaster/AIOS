@@ -1,0 +1,183 @@
+name: release
+
+# Triggered by pushing a version tag matching v*. On tag push we:
+#   1. run the Go test suite (no broken release tags get published)
+#   2. run goreleaser → native binaries + GitHub Release
+#   3. stage npm packages from dist/
+#   4. publish platform packages first (concurrent), then the main package
+#
+# Publishing is skipped (exit 0 with a log line) if NPM_TOKEN is not set,
+# so the workflow is safe to run on an unconfigured repo. Provenance is
+# enabled via GitHub OIDC (no extra secret needed) and is best-effort:
+# npm publish falls back to a non-provenance publish if provenance is not
+# supported by the registry.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and stage only; do not publish to npm"
+        required: false
+        default: "false"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # goreleaser: create GitHub Release
+  id-token: write   # npm provenance via OIDC
+  packages: read
+
+jobs:
+  # -----------------------------------------------------------------------
+  # 1. Tests — fail the release if anything is red. Mirrors ci.yml but
+  #    duplicated here so a release cannot ride on a stale CI green.
+  # -----------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26" }
+      - run: go vet ./...
+      - run: go test ./...
+      - name: validate npm sources
+        run: node scripts/validate-npm.mjs
+
+  # -----------------------------------------------------------------------
+  # 2. Goreleaser — builds cross-platform binaries, tars them, uploads to
+  #    the GitHub Release, and leaves dist/ on disk for the npm step.
+  # -----------------------------------------------------------------------
+  goreleaser:
+    needs: [test]
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26" }
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF##refs/tags/}"
+          if [[ "$TAG" != v* ]]; then
+            echo "not a v* tag push; using 0.0.0-manual-${GITHUB_RUN_ID}"
+            TAG="0.0.0-manual-${GITHUB_RUN_ID}"
+          fi
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "resolved version: $VERSION"
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stage npm packages
+        env:
+          AIOS_VERSION: ${{ steps.version.outputs.version }}
+        run: node scripts/build-npm.mjs
+
+      - name: Upload dist/npm for publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-staged
+          path: dist/npm
+          retention-days: 7
+
+  # -----------------------------------------------------------------------
+  # 3. npm publish — platform packages first (must exist before main's
+  #    optionalDependencies can resolve), main last. Provenance via OIDC.
+  #    Publishing is skipped entirely if NPM_TOKEN secret is absent so the
+  #    workflow works out-of-the-box on a fresh fork / unconfigured repo.
+  # -----------------------------------------------------------------------
+  publish-npm:
+    needs: [goreleaser]
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    if: ${{ inputs.dry_run != 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-staged
+          path: dist/npm
+
+      - name: Publish platform packages
+        if: ${{ env.NPM_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN:       ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          for dir in dist/npm/aios-*; do
+            [ -d "$dir" ] || continue
+            echo "::group::publish $dir"
+            # Platform packages are small, public, scoped. --provenance is
+            # best-effort: if the registry/OIDC bridge is unavailable on
+            # this runner, retry without --provenance rather than fail.
+            npm publish "$dir" --access public --provenance \
+              || npm publish "$dir" --access public
+            echo "::endgroup::"
+          done
+
+      - name: Publish main package (last)
+        if: ${{ env.NPM_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN:       ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Wait briefly for the platform packages to become resolvable in
+          # the registry — npm publish returns on the leader's write, but
+          # the CDN fronting registry.npmjs.org can take a few seconds.
+          echo "waiting 10s for registry propagation..."
+          sleep 10
+          npm publish dist/npm/aios --access public --provenance \
+            || npm publish dist/npm/aios --access public
+
+      - name: Skip (no NPM_TOKEN secret)
+        if: ${{ env.NPM_TOKEN == '' }}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "NPM_TOKEN secret is not set; skipping npm publish."
+          echo "To enable publishing, follow docs/release-maintainers.md."
+
+      - name: Verify published versions (smoke)
+        if: ${{ env.NPM_TOKEN != '' }}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          V="${{ needs.goreleaser.outputs.version }}"
+          # `npm view` will 404 briefly if the CDN hasn't propagated;
+          # retry a few times before giving up so release-status notifications
+          # don't spook maintainers over cache lag.
+          tries=0
+          until npm view "@mooncodemaster/aios@${V}" version > /dev/null 2>&1; do
+            tries=$((tries+1))
+            if [ "$tries" -ge 12 ]; then
+              echo "npm view failed after 12 retries; the publish may still be propagating."
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "registry confirms @mooncodemaster/aios@${V} exists"

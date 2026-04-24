@@ -1,0 +1,19 @@
+{
+  "name": "@mooncodemaster/aios-linux-arm64",
+  "version": "0.0.0-dev",
+  "description": "Native aios binary for Linux on arm64. Installed automatically as an optional dependency of @mooncodemaster/aios.",
+  "homepage": "https://github.com/MoonCodeMaster/AIOS",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MoonCodeMaster/AIOS.git"
+  },
+  "license": "MIT",
+  "author": "MoonCodeMaster",
+  "os": ["linux"],
+  "cpu": ["arm64"],
+  "files": [
+    "bin/aios",
+    "README.md",
+    "LICENSE"
+  ]
+}

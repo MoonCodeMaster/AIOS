@@ -1,0 +1,43 @@
+{
+  "name": "@mooncodemaster/aios",
+  "version": "0.0.0-dev",
+  "description": "AIOS — dual-AI project orchestrator. Claude CLI writes, Codex CLI reviews (or vice versa). Per-task git worktrees. Full audit trail on disk.",
+  "keywords": [
+    "ai",
+    "cli",
+    "claude",
+    "codex",
+    "code-review",
+    "agent",
+    "orchestrator",
+    "automation"
+  ],
+  "homepage": "https://github.com/MoonCodeMaster/AIOS",
+  "bugs": {
+    "url": "https://github.com/MoonCodeMaster/AIOS/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MoonCodeMaster/AIOS.git"
+  },
+  "license": "MIT",
+  "author": "MoonCodeMaster",
+  "bin": {
+    "aios": "bin/aios.js"
+  },
+  "files": [
+    "bin/aios.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@mooncodemaster/aios-darwin-arm64": "0.0.0-dev",
+    "@mooncodemaster/aios-darwin-x64": "0.0.0-dev",
+    "@mooncodemaster/aios-linux-arm64": "0.0.0-dev",
+    "@mooncodemaster/aios-linux-x64": "0.0.0-dev",
+    "@mooncodemaster/aios-win32-x64": "0.0.0-dev"
+  }
+}

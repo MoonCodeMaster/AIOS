@@ -16,3 +16,34 @@ jobs:
       - run: go test ./...
       - run: AIOS_BIN=$(pwd)/bin/aios go build -o bin/aios ./cmd/aios
       - run: AIOS_BIN=$(pwd)/bin/aios go test ./test/integration/...
+
+  # Validate the npm distribution sources on every PR/push. This is cheap
+  # (pure Node, no install) and catches drift between npm/aios,
+  # npm/platforms/*, scripts/*.mjs, and the launcher's platform table
+  # long before a release tag is cut.
+  npm-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: node scripts/validate-npm.mjs
+
+  # Dry-run the npm packager with --allow-missing-dist to prove the main
+  # package stages cleanly (no binary copy attempted). Catches a broken
+  # build-npm.mjs on every PR.
+  npm-stage-dryrun:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: stage main package only (no binaries)
+        env:
+          AIOS_VERSION: 0.0.0-ci-dryrun
+        run: node scripts/build-npm.mjs --allow-missing-dist
+      - name: npm pack the staged main package
+        run: |
+          set -e
+          cd dist/npm/aios
+          npm pack --dry-run
