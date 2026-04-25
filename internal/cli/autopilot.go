@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -31,13 +32,24 @@ leaves the PR open without merging — the URL is printed and the run exits 2.
 Requires: gh CLI on PATH, an authenticated gh session, and a configured git remote.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			wd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("cannot determine working directory: %w", err)
+			}
+			if err := newAutopilotPreflight(wd).Check(); err != nil {
+				return err
+			}
 			idea := strings.Join(args, " ")
 			if err := runNew(NewOpts{Idea: idea, Auto: true}); err != nil {
 				return fmt.Errorf("aios new (auto): %w", err)
 			}
 			runCmd := newRunCmd()
-			_ = runCmd.Flags().Set("autopilot", "true")
-			_ = runCmd.Flags().Set("merge", "true")
+			if err := runCmd.Flags().Set("autopilot", "true"); err != nil {
+				return fmt.Errorf("internal: set --autopilot: %w", err)
+			}
+			if err := runCmd.Flags().Set("merge", "true"); err != nil {
+				return fmt.Errorf("internal: set --merge: %w", err)
+			}
 			return runMain(runCmd, nil)
 		},
 	}
