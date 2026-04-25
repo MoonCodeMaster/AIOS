@@ -11,9 +11,14 @@ type TaskID = string
 
 type TaskResult struct {
 	ID          TaskID
-	Status      string       // "converged" | "blocked"
+	Status      string       // "converged" | "blocked" | "decomposed" | "abandoned"
 	Reason      string       // deprecated: mirror of BlockReason.String()
 	BlockReason *BlockReason // nil on success; populated on block
+	// Children is populated when Status == "decomposed" and lists the sub-tasks
+	// produced by the auto-decompose handler. Scheduler.Done splices them into
+	// pending and rewires dependents to wait on the children rather than the
+	// (now-decomposed) parent.
+	Children []*spec.Task
 }
 
 // Scheduler is the per-run DAG bookkeeper. It owns the ready channel that
@@ -96,6 +101,13 @@ func (s *Scheduler) Done(r TaskResult) {
 	defer s.mu.Unlock()
 	s.inflight--
 	s.settled++
+	if r.Status == "decomposed" {
+		s.spliceDecomposedLocked(r.ID, r.Children)
+		if s.inflight == 0 && len(s.pending) == 0 {
+			s.doneOnce.Do(func() { close(s.done) })
+		}
+		return
+	}
 	if r.Status == "blocked" {
 		reason := BlockReason{Code: CodeEngineInvokeFailed, Detail: r.Reason}
 		if r.BlockReason != nil {
@@ -129,6 +141,62 @@ func (s *Scheduler) enqueueLocked(id TaskID) {
 	delete(s.pending, id)
 	s.inflight++
 	s.ready <- id
+}
+
+// spliceDecomposedLocked atomically inserts the children of a decomposed
+// parent into the scheduler's pending set, rewires every dependent of the
+// parent to depend on ALL children (a dependent of a decomposed parent must
+// wait for the entire split to converge), and enqueues any children that
+// have no remaining deps. The parent itself is silently retired — it neither
+// converges nor blocks. Caller must hold s.mu.
+func (s *Scheduler) spliceDecomposedLocked(parentID TaskID, children []*spec.Task) {
+	if len(children) == 0 {
+		// Defensive: a decomposed result with no children is equivalent to
+		// abandoning the parent. Cascade-block dependents.
+		s.blocked[parentID] = BlockReason{Code: CodeStallNoProgress, Detail: "decomposed with empty children"}
+		s.cascadeBlockLocked(parentID)
+		return
+	}
+	parentDependents := s.dependents[parentID]
+	childIDSet := map[TaskID]struct{}{}
+	for _, c := range children {
+		childIDSet[c.ID] = struct{}{}
+	}
+	for _, c := range children {
+		s.pending[c.ID] = c
+		s.deps[c.ID] = map[TaskID]struct{}{}
+		for _, d := range c.DependsOn {
+			s.deps[c.ID][d] = struct{}{}
+		}
+		if s.dependents[c.ID] == nil {
+			s.dependents[c.ID] = map[TaskID]struct{}{}
+		}
+		s.total++
+		for d := range s.deps[c.ID] {
+			if s.dependents[d] == nil {
+				s.dependents[d] = map[TaskID]struct{}{}
+			}
+			s.dependents[d][c.ID] = struct{}{}
+		}
+	}
+	// Rewire every dependent-of-parent: drop the dep on parent, add a dep on
+	// every child. Each dependent now waits for the full split.
+	for dep := range parentDependents {
+		delete(s.deps[dep], parentID)
+		for cid := range childIDSet {
+			s.deps[dep][cid] = struct{}{}
+			if s.dependents[cid] == nil {
+				s.dependents[cid] = map[TaskID]struct{}{}
+			}
+			s.dependents[cid][dep] = struct{}{}
+		}
+	}
+	// Children with no remaining deps are immediately ready.
+	for _, c := range children {
+		if len(s.deps[c.ID]) == 0 {
+			s.enqueueLocked(c.ID)
+		}
+	}
 }
 
 func (s *Scheduler) releaseDependentsLocked(doneID TaskID) {
