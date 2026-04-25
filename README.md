@@ -116,12 +116,31 @@ troubleshoot `--no-optional`, air-gapped mirrors, or Windows on ARM.
 ```bash
 cd your-repo
 aios init                          # writes .aios/config.toml; autodetects Go/Node/Python/Rust
+aios doctor                        # one-shot preflight: engines, auth, repo, config
 aios new "Add a /health endpoint with a unit test"
 # review the proposed spec + task list; confirm with `y`
 aios run                           # coder↔reviewer loop until aios/staging is green
 git log aios/staging               # audit the coder↔reviewer history
 git merge aios/staging             # you're the last human in the loop
 ```
+
+## Command index
+
+| Command | What it does |
+|---|---|
+| `aios init` | Bootstrap `.aios/config.toml` for the current repo. |
+| `aios doctor` | One-shot preflight — engines, auth, git, config, smoke-test. |
+| `aios new <idea>` | Brainstorm → spec → task list. Confirms before commit. |
+| `aios run` | Iterate over pending tasks; coder↔reviewer per task. |
+| `aios autopilot <idea>` | `new --auto` then `run --autopilot --merge` end-to-end. |
+| `aios architect <idea>` | 4-round mind-map planner — pick from 3 finalists, then autopilot. |
+| `aios duel <task>` | Race Claude and Codex on the same task; reviewer picks the winner. |
+| `aios review <pr>` | Cross-model PR review; optional comment-back via `gh pr comment`. |
+| `aios serve` | Issue-bot daemon — watches `aios:do`-labeled GitHub issues. |
+| `aios cost [run-id]` | USD estimate per run from the on-disk audit trail. |
+| `aios lessons` | Mine `.aios/runs/` for recurring reviewer-issue patterns. |
+| `aios mcp scaffold <preset>` | Append a ready MCP server block (github / fs-readonly / playwright). |
+| `aios resume`, `aios status` | Standard run-management helpers. |
 
 ## Autopilot mode (no human input)
 
@@ -190,6 +209,76 @@ Recursion is bounded by `[budget] max_decompose_depth` (default 2, hard cap 3).
 A child that re-stalls at the depth cap abandons rather than recursively splits.
 If both engines error, or the synthesizer emits fewer than 2 sub-tasks, the
 parent abandons via the audit-trail path described above.
+
+## Duel mode (race Claude and Codex on one task)
+
+Want to know which engine is stronger on a specific kind of change — a
+security fix, a data migration, a perf-critical hot path? Run a duel:
+
+```bash
+aios duel "Add a rate limiter to the /login endpoint with 10 req/min per IP"
+```
+
+Both engines run as coders in parallel, each in its own ephemeral
+worktree. The reviewer-default engine then reads both diffs and picks a
+winner on three axes: correctness, minimality, clarity. No commits are
+made; both worktrees are torn down on exit. Pass `--apply` to copy the
+winning diff onto your working tree as uncommitted changes.
+
+This is something neither Claude CLI nor Codex CLI can do alone.
+
+## PR review mode (cross-model review of any GitHub PR)
+
+```bash
+aios review 42                      # number — resolves against current repo
+aios review https://github.com/owner/repo/pull/42
+aios review 42 --post               # also publish via `gh pr comment`
+```
+
+Both engines review the diff in parallel; the reviewer-default engine
+synthesises one consolidated comment. The merged verdict is the more
+conservative of the two (request-changes wins over comment-only wins
+over approve), and disagreements between the two reviewers are surfaced
+rather than hidden.
+
+## Cost telemetry
+
+Every run lands its raw token usage in `.aios/runs/<id>/`. To turn that
+into a dollar estimate at any time:
+
+```bash
+aios cost              # cost the most recent run
+aios cost <run-id>     # cost a specific run
+aios cost --all        # per-run table plus grand total
+```
+
+Pricing is a hardcoded table (`internal/cost/pricing.go`) — treat the
+output as an estimate, not an invoice. The numbers stay correct on
+year-old run directories because every input is on disk.
+
+## Lessons learned
+
+After a few runs, AIOS has a sample of what the reviewer keeps catching:
+
+```bash
+aios lessons
+```
+
+Aggregates every reviewer issue across every run into a 30-second report:
+top issue categories, top recurring note shapes, hot-spot files, noisiest
+runs. Use it to decide where editing `coder.tmpl`, the spec, or the
+codebase itself will pay back the most review-loop time.
+
+## MCP scaffold
+
+```bash
+aios mcp list                       # show all preset bodies
+aios mcp scaffold github            # append [mcp.servers.github] to config
+aios mcp scaffold fs-readonly       # local filesystem, read-only
+aios mcp scaffold playwright        # headless browser
+```
+
+Idempotent. Re-running with the same preset is a no-op.
 
 ## Serve mode (issue bot)
 
