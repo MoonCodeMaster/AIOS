@@ -223,6 +223,23 @@ func TestRender_DecomposeStuck(t *testing.T) {
 	}
 }
 
+func TestRender_DecomposeMerge(t *testing.T) {
+	out, err := Render("decompose-merge.tmpl", map[string]any{
+		"ParentID":   "005",
+		"ParentBody": "Add /health.",
+		"ProposalA":  "---\nid: 005.1\n---\nClaude's split A",
+		"ProposalB":  "---\nid: 005.1\n---\nCodex's split B",
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, want := range []string{"005", "Claude", "Codex", "Proposal A", "Proposal B", "===TASK===", "merge"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("decompose-merge.tmpl output missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
 func TestRender_Unknown(t *testing.T) {
 	_, err := Render("nope.tmpl", nil)
 	if err == nil {
