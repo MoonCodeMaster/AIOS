@@ -29,5 +29,6 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newDuelCmd())
 	root.AddCommand(newCostCmd())
 	root.AddCommand(newLessonsCmd())
+	root.AddCommand(newReviewCmd())
 	return root
 }
