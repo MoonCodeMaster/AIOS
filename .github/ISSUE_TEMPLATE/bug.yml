@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in AIOS is broken or behaves incorrectly.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug. What did you expect? What did you see instead?
+      placeholder: |
+        I ran `aios autopilot "..."` and ...
+        I expected ...
+        Instead, I saw ...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: AIOS version
+      description: Output of `aios --version`.
+      placeholder: "v0.3.0"
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Go version (if building from source), Claude/Codex CLI versions.
+      placeholder: |
+        macOS 14.4
+        go version go1.26.2
+        claude --version
+        codex --version
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / audit trail
+      description: Output of the failing run, or the contents of `.aios/runs/<run>/<task>/round-N/`.
+      render: shell

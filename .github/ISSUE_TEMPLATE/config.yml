@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/MoonCodeMaster/AIOS#readme
+    about: Start here — README covers install, quick start, autopilot mode.
+  - name: Architecture
+    url: https://github.com/MoonCodeMaster/AIOS/blob/main/docs/architecture.md
+    about: How AIOS works internally — orchestrator, merge queue, decompose.
