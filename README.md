@@ -137,6 +137,22 @@ aios autopilot "Add a /health endpoint with a unit test"
 Requires: `gh` CLI authenticated (`gh auth login`) and a configured git remote.
 Stalled tasks land under `.aios/runs/<id>/abandoned/<task>/` for later review.
 
+### Auto-decompose for stalled tasks
+
+When a task stalls — repeated rounds raise the same unresolved reviewer issues
+even after escalation — autopilot tries to split it before giving up:
+
+1. Claude and Codex each independently propose a 2–4 sub-task split.
+2. Whichever engine reviewed the stuck task synthesises the two proposals
+   into a single unified split.
+3. Sub-tasks land in `.aios/tasks/<parent>.<n>.md`, the parent's frontmatter
+   is marked `status: decomposed`, and the run continues with the children.
+
+Recursion is bounded by `[budget] max_decompose_depth` (default 2, hard cap 3).
+A child that re-stalls at the depth cap abandons rather than recursively splits.
+If both engines error, or the synthesizer emits fewer than 2 sub-tasks, the
+parent abandons via the audit-trail path described above.
+
 ## What a run actually produces
 
 ```
@@ -274,8 +290,9 @@ Codex through a small corpus of scenarios; see [`docs/e2e-setup.md`](docs/e2e-se
 
 Known limitations in the current release:
 
-- Auto-decompose for stuck tasks is shipping in v0.3.0; in autopilot mode (v0.2.0)
-  stalled tasks are abandoned with a full audit trail rather than blocking the run.
+- Auto-decompose for stuck tasks ships in v0.3.0: parallel Claude+Codex
+  proposals + reviewer synthesis. Children inherit the parent's dependency
+  graph; downstream tasks wait for the full split.
 - `--sandbox` (container isolation) remains stubbed; per-task `git worktree`
   isolation continues to be the v0.x story.
 - MCP call failures are surfaced in audit logs; surfacing them inside the
