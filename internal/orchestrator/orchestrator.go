@@ -29,7 +29,7 @@ type Deps struct {
 	}
 	// Prompt renderers are injected so tests don't need templates on disk.
 	RenderCoder    func(in CoderInput) string
-	RenderReviewer func(task *spec.Task, diff string, checks []verify.CheckResult) string
+	RenderReviewer func(task *spec.Task, diff string, checks []verify.CheckResult, mcpFailures []engine.McpCall) string
 	// Diff is a callback returning the current diff for this task's worktree.
 	Diff func() (string, error)
 
@@ -106,6 +106,11 @@ type RoundRecord struct {
 	Review         ReviewResult // parsed review verdict
 	Checks         []verify.CheckResult
 	UsageTokens    int
+	// McpCalls captures every MCP tool call the coder made this round
+	// (success and failure alike). Failed calls — Error != "" or Denied — are
+	// surfaced into the reviewer prompt so the reviewer can distinguish a
+	// coder mistake from an MCP outage.
+	McpCalls []engine.McpCall
 }
 
 type Outcome struct {
@@ -196,9 +201,18 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 		// --- verifying ---
 		r.Checks = d.Verifier.Run()
 
+		// Capture MCP calls from the coder's response so the audit trail and
+		// the reviewer prompt both see them.
+		r.McpCalls = cres.McpCalls
+		var mcpFailures []engine.McpCall
+		for _, m := range cres.McpCalls {
+			if m.Error != "" || m.Denied {
+				mcpFailures = append(mcpFailures, m)
+			}
+		}
 		// --- reviewing ---
 		diff, _ := d.Diff()
-		rp := d.RenderReviewer(task, diff, r.Checks)
+		rp := d.RenderReviewer(task, diff, r.Checks, mcpFailures)
 		r.ReviewerPrompt = rp
 		rres, err := d.Reviewer.Invoke(ctx, engine.InvokeRequest{
 			Role:    engine.RoleReviewer,
@@ -410,7 +424,7 @@ func defaultCoderRender(in CoderInput) string {
 	return b.String()
 }
 
-func defaultReviewerRender(task *spec.Task, diff string, checks []verify.CheckResult) string {
+func defaultReviewerRender(task *spec.Task, diff string, checks []verify.CheckResult, mcpFailures []engine.McpCall) string {
 	return fmt.Sprintf("Review task %s. Diff:\n%s\nChecks: %+v\nAcceptance: %v",
 		task.ID, diff, checks, task.Acceptance)
 }

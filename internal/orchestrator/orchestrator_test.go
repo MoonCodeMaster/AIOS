@@ -101,7 +101,9 @@ func TestRun_RecordsAuditTrail(t *testing.T) {
 		Coder: coder, Reviewer: reviewer,
 		Verifier:       &stubVerifier{results: []verify.CheckResult{{Name: "t", Status: verify.StatusPassed}}},
 		RenderCoder:    func(in CoderInput) string { return "coder prompt v1" },
-		RenderReviewer: func(_ *spec.Task, _ string, _ []verify.CheckResult) string { return "reviewer prompt v1" },
+		RenderReviewer: func(_ *spec.Task, _ string, _ []verify.CheckResult, _ []engine.McpCall) string {
+			return "reviewer prompt v1"
+		},
 		MaxRounds:      5, MaxTokens: 10000, MaxWall: time.Minute,
 	}
 	out, err := Run(context.Background(), task, dep)
@@ -714,5 +716,44 @@ func TestRunAllSerialN1(t *testing.T) {
 	}
 	if len(report.Converged) != 1 || report.Converged[0] != "T1" {
 		t.Errorf("Converged = %v, want [T1]", report.Converged)
+	}
+}
+
+func TestRun_RoundRecordCapturesMcpCalls(t *testing.T) {
+	approve := `{"approved":true,"criteria":[{"id":"c1","status":"satisfied"}],"issues":[]}`
+	coder := &engine.FakeEngine{Name_: "claude", Script: []engine.InvokeResponse{
+		{Text: "coded", McpCalls: []engine.McpCall{
+			{Server: "github", Tool: "search_code", Error: "401"},
+			{Server: "docs", Tool: "fetch"}, // success
+		}},
+	}}
+	reviewer := &engine.FakeEngine{Name_: "codex", Script: []engine.InvokeResponse{{Text: approve}}}
+
+	var capturedFailures []engine.McpCall
+	dep := &Deps{
+		Coder: coder, Reviewer: reviewer,
+		Verifier: &stubVerifier{results: []verify.CheckResult{{Name: "test_cmd", Status: verify.StatusPassed}}},
+		RenderReviewer: func(_ *spec.Task, _ string, _ []verify.CheckResult, mcpFailures []engine.McpCall) string {
+			capturedFailures = mcpFailures
+			return "review prompt"
+		},
+		MaxRounds: 5, MaxTokens: 10000, MaxWall: time.Minute,
+	}
+	task := &spec.Task{ID: "001", Kind: "feature", Status: "pending", Acceptance: []string{"c1"}}
+	out, err := Run(context.Background(), task, dep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Final != StateConverged {
+		t.Fatalf("final = %s", out.Final)
+	}
+	if len(out.Rounds) != 1 {
+		t.Fatalf("rounds = %d, want 1", len(out.Rounds))
+	}
+	if len(out.Rounds[0].McpCalls) != 2 {
+		t.Errorf("RoundRecord.McpCalls = %d, want 2 (full call list)", len(out.Rounds[0].McpCalls))
+	}
+	if len(capturedFailures) != 1 || capturedFailures[0].Server != "github" {
+		t.Errorf("reviewer received MCP failures = %+v, want exactly the failed github.search_code call", capturedFailures)
 	}
 }

@@ -20,6 +20,18 @@ acceptance criterion AND the verify suite is green.
 {{- range .Checks}}
 - {{.Name}}: {{.Status}}{{if .ExitCode}} (exit {{.ExitCode}}){{end}}
 {{- end}}
+{{- if .MCPFailures}}
+
+# MCP failures this round
+
+The coder attempted these MCP tool calls and they failed. When evaluating
+acceptance criteria, distinguish "the coder ignored a requirement" from
+"the coder couldn't reach external context."
+
+{{- range .MCPFailures}}
+- {{.Server}}.{{.Tool}}: {{.Error}}
+{{- end}}
+{{- end}}
 
 # Diff (against staging)
 ---

@@ -304,12 +304,13 @@ func runMain(cmd *cobra.Command, args []string) error {
 			return out
 		}
 
-		renderReviewer := func(task *spec.Task, diff string, ck []verify.CheckResult) string {
+		renderReviewer := func(task *spec.Task, diff string, ck []verify.CheckResult, mcpFailures []engine.McpCall) string {
 			out, err := prompts.Render("reviewer.tmpl", reviewerData{
-				Project: pctx.Project,
-				Task:    task,
-				Diff:    diff,
-				Checks:  ck,
+				Project:     pctx.Project,
+				Task:        task,
+				Diff:        diff,
+				Checks:      ck,
+				MCPFailures: mcpFailures,
 			})
 			if err != nil {
 				return fmt.Sprintf("reviewer render error: %v\nTask: %s\nDiff:\n%s",
@@ -468,10 +469,11 @@ func runMain(cmd *cobra.Command, args []string) error {
 		// diff the reviewer has never seen is never silently merged.
 		reReview := func(newDiff []byte) (bool, error) {
 			promptText, err := prompts.Render("reviewer.tmpl", reviewerData{
-				Project: pctx.Project,
-				Task:    tk,
-				Diff:    string(newDiff),
-				Checks:  []verify.CheckResult{},
+				Project:     pctx.Project,
+				Task:        tk,
+				Diff:        string(newDiff),
+				Checks:      []verify.CheckResult{},
+				MCPFailures: nil,
 			})
 			if err != nil {
 				return false, fmt.Errorf("rebase re-review render: %w", err)

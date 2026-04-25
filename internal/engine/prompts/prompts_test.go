@@ -240,6 +240,40 @@ func TestRender_DecomposeMerge(t *testing.T) {
 	}
 }
 
+func TestRender_Reviewer_IncludesMCPFailures(t *testing.T) {
+	out, err := Render("reviewer.tmpl", map[string]any{
+		"Task":   map[string]any{"ID": "001", "Kind": "feature", "Acceptance": []string{"c1"}},
+		"Diff":   "diff content",
+		"Checks": []map[string]any{{"Name": "test_cmd", "Status": "passed"}},
+		"MCPFailures": []map[string]any{
+			{"Server": "github", "Tool": "search_code", "Error": "401 unauthorized"},
+			{"Server": "docs", "Tool": "fetch", "Error": "timeout"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, want := range []string{"MCP failures", "github", "search_code", "401 unauthorized", "docs", "timeout"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("reviewer.tmpl with MCPFailures missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
+func TestRender_Reviewer_OmitsMCPSectionWhenNoFailures(t *testing.T) {
+	out, err := Render("reviewer.tmpl", map[string]any{
+		"Task":   map[string]any{"ID": "001", "Kind": "feature", "Acceptance": []string{"c1"}},
+		"Diff":   "diff content",
+		"Checks": []map[string]any{{"Name": "test_cmd", "Status": "passed"}},
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(out, "MCP failures") {
+		t.Errorf("reviewer.tmpl with no MCPFailures must not render the MCP section\n--- output ---\n%s", out)
+	}
+}
+
 func TestRender_Unknown(t *testing.T) {
 	_, err := Render("nope.tmpl", nil)
 	if err == nil {

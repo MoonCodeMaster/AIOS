@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/MoonCodeMaster/AIOS/internal/orchestrator"
 	"github.com/MoonCodeMaster/AIOS/internal/spec"
 	"github.com/MoonCodeMaster/AIOS/internal/verify"
@@ -58,10 +59,11 @@ type coderReviseData struct {
 
 // reviewerData is the shape consumed by reviewer.tmpl.
 type reviewerData struct {
-	Project *spec.Project
-	Task    *spec.Task
-	Diff    string
-	Checks  []verify.CheckResult
+	Project     *spec.Project
+	Task        *spec.Task
+	Diff        string
+	Checks      []verify.CheckResult
+	MCPFailures []engine.McpCall
 }
 
 // loadProject parses .aios/project.md if present. A missing file is not fatal
