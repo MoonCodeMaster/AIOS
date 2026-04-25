@@ -81,6 +81,13 @@ func TestRunIDFromPath_ExtractsFirstSegment(t *testing.T) {
 	}
 }
 
+func TestMine_MissingDirReturnsErr(t *testing.T) {
+	_, err := Mine("/this/path/really/does/not/exist")
+	if err == nil {
+		t.Error("Mine should error on missing root, not silently return empty report (would mislead user with 'no issues found' banner)")
+	}
+}
+
 func TestRender_NoIssuesShowsExplanation(t *testing.T) {
 	var buf bytes.Buffer
 	Report{TotalRuns: 3}.Render(&buf)

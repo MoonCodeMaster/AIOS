@@ -65,6 +65,10 @@ func Mine(runsDir string) (Report, error) {
 	runIssueCount := map[string]int{}
 	runs := map[string]bool{}
 
+	// "no runs dir" is a config mistake, not "no issues found" — surface it.
+	if _, err := os.Stat(runsDir); err != nil {
+		return rep, err
+	}
 	err := filepath.WalkDir(runsDir, func(path string, _ os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil

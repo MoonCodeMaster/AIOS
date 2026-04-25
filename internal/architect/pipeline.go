@@ -86,6 +86,14 @@ func Run(ctx context.Context, in Input) (Output, error) {
 		codexProp = r.Text
 	}()
 	wg.Wait()
+	// Persist errors as siblings to the txt artifacts so the audit shows
+	// WHY a side is empty (vs. silently looking like the model went silent).
+	if claudeErr != nil {
+		out.RawArtifacts["1-claude.err"] = claudeErr.Error()
+	}
+	if codexErr != nil {
+		out.RawArtifacts["1-codex.err"] = codexErr.Error()
+	}
 	if claudeErr != nil && codexErr != nil {
 		return out, fmt.Errorf("architect: both proposers errored: claude=%v, codex=%v", claudeErr, codexErr)
 	}

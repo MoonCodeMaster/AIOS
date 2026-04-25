@@ -70,6 +70,12 @@ func (t Tally) EstimateUSD() float64 {
 // better than a crash on a malformed log line.
 func FromRunDir(runRoot string) (Tally, error) {
 	t := Tally{}
+	// Distinguish "no audit found" from "empty audit": the former is a
+	// configuration mistake (wrong path), the latter is a real run that
+	// just had nothing parseable.
+	if _, err := os.Stat(runRoot); err != nil {
+		return t, err
+	}
 	err := filepath.WalkDir(runRoot, func(path string, _ os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil // tolerate per-file errors
@@ -115,15 +121,26 @@ func classify(raw []byte) (string, Usage) {
 	return "", Usage{}
 }
 
+// tryClaudeJSON only matches Claude's output shape. The discriminator is
+// `type == "result"` (Claude's top-level wrapper) plus the input/output
+// pair — both fields. Codex single-object output uses `total_tokens` as
+// its only usage field, so that shape is rejected here and falls through
+// to tryCodexSingleJSON. Without this guard a Codex response with
+// per-call input/output token splits gets priced at Claude rates.
 func tryClaudeJSON(raw []byte) (string, Usage, bool) {
 	var doc struct {
-		Type  string `json:"type"`
-		Usage struct {
+		Type    string `json:"type"`
+		Subtype string `json:"subtype"`
+		Result  string `json:"result"`
+		Usage   struct {
 			InputTokens  int `json:"input_tokens"`
 			OutputTokens int `json:"output_tokens"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(raw, &doc); err != nil {
+		return "", Usage{}, false
+	}
+	if doc.Type != "result" {
 		return "", Usage{}, false
 	}
 	if doc.Usage.InputTokens == 0 && doc.Usage.OutputTokens == 0 {
@@ -157,9 +174,9 @@ func tryCodexSingleJSON(raw []byte) (string, Usage, bool) {
 
 func tryCodexNDJSON(raw []byte) (string, Usage, bool) {
 	lines := strings.Split(string(raw), "\n")
-	if len(lines) < 2 {
-		return "", Usage{}, false
-	}
+	// Don't gate on line count — a single valid {"type":"usage",...} event
+	// is enough to identify the format. The `any` flag below is the real
+	// gate: at least one usage event must be present for us to claim NDJSON.
 	var u Usage
 	any := false
 	for _, ln := range lines {

@@ -80,6 +80,25 @@ func TestClassify_CodexNDJSON(t *testing.T) {
 	}
 }
 
+// Regression: a Codex single-object response that happens to populate
+// input_tokens / output_tokens (instead of total_tokens) must NOT be
+// classified as Claude — Claude pricing is 3-15x higher and the silent
+// mis-attribution would inflate the cost report by a wide margin.
+func TestClassify_CodexLooksLikeClaude_StillCodex(t *testing.T) {
+	raw := []byte(`{"type":"response","text":"ok","usage":{"input_tokens":1000,"output_tokens":500}}`)
+	eng, _ := classify(raw)
+	if eng == "claude" {
+		t.Errorf("Codex response with input_tokens/output_tokens was misclassified as claude — would price at Claude rates")
+	}
+}
+
+func TestFromRunDir_MissingDirReturnsErr(t *testing.T) {
+	_, err := FromRunDir("/this/path/does/not/exist/anywhere")
+	if err == nil {
+		t.Error("FromRunDir should error on missing root, not silently return empty tally")
+	}
+}
+
 func TestClassify_UnknownReturnsEmpty(t *testing.T) {
 	if eng, _ := classify([]byte("not json")); eng != "" {
 		t.Errorf("unknown classified as %q", eng)

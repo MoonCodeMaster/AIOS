@@ -87,9 +87,26 @@ func runDuel(ctx context.Context, task string, apply bool) error {
 
 	claude := &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec}
 	codex := &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec}
+	// CRITICAL: the judge must be neither duellist. Both Claude and Codex are
+	// in the duel, so a third engine is required. We do not have one in v0,
+	// so we instead select whichever of the two has a *fresh prompt context*
+	// — the synthesizer prompt — and rely on the duel-judge template's
+	// structure to defend against author-favouring bias. Even so, the loser
+	// always has the advantage that the judge is the *other* engine, NOT
+	// itself: enforce this by alternating the judge against the cfg's
+	// reviewer-default. When reviewer-default = codex, judge = codex (codex
+	// judges its own work less harshly than claude's, so we prefer claude as
+	// judge); but we want the judge that is LEAST aligned with each duellist
+	// in turn. Simplest safe rule: always pick the engine whose role in the
+	// project is *reviewer*; that is the side users have already trusted to
+	// be unbiased on the codebase. The bias risk remaining is "same-engine
+	// judge", which we surface in the verdict header so the user can
+	// discount accordingly.
 	var judge engine.Engine = codex
+	judgeName := "codex"
 	if cfg.Engines.ReviewerDefault == "claude" {
 		judge = claude
+		judgeName = "claude"
 	}
 
 	wm := &worktree.Manager{RepoDir: wd, Root: filepath.Join(wd, cfg.Runtime.WorktreeRoot)}
@@ -181,6 +198,10 @@ func runDuel(ctx context.Context, task string, apply bool) error {
 	}
 	_ = rec.WriteFile("duel/verdict.txt", []byte(judgeRaw))
 
+	// Surface judge identity so the user can discount same-engine bias.
+	// Until AIOS supports a third (out-of-duel) engine, the judge is
+	// inherently one of the duellists; the user deserves to know which.
+	fmt.Printf("duel: judge = %s (note: judge is one of the duellists; bias caveat applies)\n", judgeName)
 	printDuelVerdict(os.Stdout, "claude", "codex", resA, resB, diffA, diffB, verdict)
 
 	if apply {
@@ -364,7 +385,10 @@ func applyDiffToWorktree(wd, diff string) error {
 		return err
 	}
 	defer os.Remove(patchPath)
-	c := exec.Command("git", "-C", wd, "apply", "--whitespace=fix", patchPath)
+	// Don't pass --whitespace=fix: it silently rewrites trailing whitespace
+	// and CRLFs, which can mask a real conflict and produce a working tree
+	// that no longer matches the diff the judge ranked.
+	c := exec.Command("git", "-C", wd, "apply", patchPath)
 	out, err := c.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git apply failed: %w\n%s", err, string(out))

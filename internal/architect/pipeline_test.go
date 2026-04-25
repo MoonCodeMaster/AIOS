@@ -164,6 +164,29 @@ func TestRun_BothProposersErr_ReturnsErr(t *testing.T) {
 	}
 }
 
+// Regression: Round-1 errors must land in RawArtifacts so the audit
+// trail shows WHY a side is empty (vs. the reader assuming the model
+// went silent). The other side still produces 3 finalists via synthesis.
+func TestRun_OneSideErrors_RecordsErrInArtifacts(t *testing.T) {
+	claude := &scriptedEngine{name: "claude", errs: []error{errors.New("transport hung up")}}
+	codex := &scriptedEngine{
+		name: "codex",
+		returns: []engine.InvokeResponse{
+			{Text: bp("Codex C", "ambitious")},
+			{Text: ""},
+			{Text: bp("Codex C r", "ambitious")},
+		},
+	}
+	synth := &scriptedEngine{name: "codex", returns: []engine.InvokeResponse{{Text: threeFinalists()}}}
+	out, err := Run(context.Background(), Input{Idea: "x", Claude: claude, Codex: codex, Synthesizer: synth})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if got := out.RawArtifacts["1-claude.err"]; got == "" || !strings.Contains(got, "transport hung up") {
+		t.Errorf("RawArtifacts[1-claude.err] = %q; want it to record the error", got)
+	}
+}
+
 func TestRun_NilInput_ReturnsErr(t *testing.T) {
 	_, err := Run(context.Background(), Input{Idea: ""})
 	if err == nil {

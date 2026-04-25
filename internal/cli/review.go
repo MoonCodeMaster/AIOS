@@ -223,9 +223,16 @@ type prMeta struct {
 
 func fetchPRMeta(ctx context.Context, ref prRef) (prMeta, error) {
 	args := []string{"pr", "view", ref, "--json", "title,body,headRefName,baseRefName,url"}
-	out, err := exec.CommandContext(ctx, "gh", args...).Output()
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	out, err := cmd.Output()
 	if err != nil {
-		return prMeta{}, err
+		// Surface gh's stderr — that's where "no such PR", "auth missing",
+		// "not in a repo" actually live; .Output() drops it.
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = strings.TrimSpace(string(ee.Stderr))
+		}
+		return prMeta{}, fmt.Errorf("%w: %s", err, stderr)
 	}
 	var m prMeta
 	if err := json.Unmarshal(out, &m); err != nil {
@@ -250,9 +257,14 @@ func repoFromURL(url string) string {
 }
 
 func fetchPRDiff(ctx context.Context, ref prRef) (string, error) {
-	out, err := exec.CommandContext(ctx, "gh", "pr", "diff", ref).Output()
+	cmd := exec.CommandContext(ctx, "gh", "pr", "diff", ref)
+	out, err := cmd.Output()
 	if err != nil {
-		return "", err
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = strings.TrimSpace(string(ee.Stderr))
+		}
+		return "", fmt.Errorf("%w: %s", err, stderr)
 	}
 	return string(out), nil
 }
