@@ -70,7 +70,6 @@ func runMain(cmd *cobra.Command, args []string) error {
 
 	autopilot, _ := cmd.Flags().GetBool("autopilot")
 	mergeAfter, _ := cmd.Flags().GetBool("merge")
-	_ = mergeAfter // wired in Task 9/10
 
 	// --- MCP flags ---
 	mcpServers := cfg.MCP.Servers
@@ -97,6 +96,14 @@ func runMain(cmd *cobra.Command, args []string) error {
 	if err := preflight(wd, cfg); err != nil {
 		return err
 	}
+	// Autopilot adds a second layer of preflight: gh on PATH, gh auth status
+	// clean, repo has a remote. Cheap; runs before any model invocation.
+	if autopilot {
+		if err := newAutopilotPreflight(wd).Check(); err != nil {
+			return err
+		}
+	}
+
 	tasks, err := spec.LoadTasks(filepath.Join(wd, ".aios", "tasks"))
 	if err != nil {
 		return err
@@ -489,6 +496,30 @@ func runMain(cmd *cobra.Command, args []string) error {
 		printBlockSummary(rep)
 		os.Exit(2)
 	}
+
+	if autopilot && mergeAfter {
+		host := githost.NewCLIHost()
+		fres, err := runAutopilotFinalizer(runCtx, finalizerOpts{
+			Host:           host,
+			Base:           cfg.Project.BaseBranch,
+			Head:           cfg.Project.StagingBranch,
+			Title:          autopilotPRTitle(rep),
+			Body:           autopilotPRBody(rep, rec.Root()),
+			ConvergedCount: len(rep.Converged),
+			ChecksTimeout:  30 * time.Minute,
+		})
+		// Always write the summary, regardless of finalizer outcome.
+		_ = writeAutopilotSummary(rec, fres, err)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "autopilot finalizer: %v\n", err)
+			os.Exit(2)
+		}
+		if fres.SkipReason != "" {
+			fmt.Printf("autopilot: %s; nothing to merge\n", fres.SkipReason)
+			return nil
+		}
+		fmt.Printf("autopilot: merged PR #%d (%s)\n", fres.PR.Number, fres.PR.URL)
+	}
 	return nil
 }
 
@@ -753,4 +784,48 @@ func runAutopilotFinalizer(ctx context.Context, opts finalizerOpts) (*finalizerR
 	}
 	res.Merged = true
 	return res, nil
+}
+
+func autopilotPRTitle(rep *orchestrator.RunReport) string {
+	if len(rep.Converged) == 1 {
+		return fmt.Sprintf("aios: %s", rep.Converged[0])
+	}
+	return fmt.Sprintf("aios: %d converged tasks", len(rep.Converged))
+}
+
+func autopilotPRBody(rep *orchestrator.RunReport, runRoot string) string {
+	var b strings.Builder
+	b.WriteString("Autopilot run.\n\n")
+	b.WriteString("**Converged tasks:**\n")
+	for _, id := range rep.Converged {
+		fmt.Fprintf(&b, "- %s\n", id)
+	}
+	if len(rep.Blocked) > 0 {
+		b.WriteString("\n**Blocked or abandoned:**\n")
+		for id, reason := range rep.Blocked {
+			fmt.Fprintf(&b, "- %s — %s\n", id, reason.String())
+		}
+	}
+	fmt.Fprintf(&b, "\nFull audit trail: `%s`\n", runRoot)
+	return b.String()
+}
+
+func writeAutopilotSummary(rec *run.Recorder, fres *finalizerResult, finalizerErr error) error {
+	var b strings.Builder
+	b.WriteString("# Autopilot summary\n\n")
+	if fres == nil {
+		b.WriteString("Finalizer did not run.\n")
+		return rec.WriteFile("autopilot-summary.md", []byte(b.String()))
+	}
+	if fres.SkipReason != "" {
+		fmt.Fprintf(&b, "Skipped: %s\n", fres.SkipReason)
+	} else if fres.PR != nil {
+		fmt.Fprintf(&b, "PR: %s\n", fres.PR.URL)
+		fmt.Fprintf(&b, "Checks: %s\n", fres.State)
+		fmt.Fprintf(&b, "Merged: %v\n", fres.Merged)
+	}
+	if finalizerErr != nil {
+		fmt.Fprintf(&b, "\nError: %v\n", finalizerErr)
+	}
+	return rec.WriteFile("autopilot-summary.md", []byte(b.String()))
 }
