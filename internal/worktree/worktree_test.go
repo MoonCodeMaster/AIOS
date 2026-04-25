@@ -214,3 +214,38 @@ func TestWorktree_MergeFF(t *testing.T) {
 		t.Errorf("merged content missing: %q", out)
 	}
 }
+
+// TestCreate_ReusesExistingBranchOnResume regression-tests the resume path:
+// a task that blocked once, had its worktree removed, and is now being
+// re-attempted — Create must succeed against the preserved branch instead of
+// failing because `-b` collides.
+func TestCreate_ReusesExistingBranchOnResume(t *testing.T) {
+	repo := seedRepoForTest(t)
+	wm := &Manager{RepoDir: repo, Root: filepath.Join(repo, ".aios", "worktrees")}
+
+	// First attempt (creates branch + worktree).
+	wt1, err := wm.Create("002-resume", "aios/staging")
+	if err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+	if err := wm.Remove(wt1); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	// Branch is still on disk per design.
+	g := &Git{Dir: repo}
+	if _, err := g.Run("show-ref", "--verify", "--quiet", "refs/heads/aios/task/002-resume"); err != nil {
+		t.Fatalf("branch should be preserved after Remove, but show-ref failed: %v", err)
+	}
+
+	// Resume: second Create against the same task ID must succeed.
+	wt2, err := wm.Create("002-resume", "aios/staging")
+	if err != nil {
+		t.Fatalf("resume Create failed (regression — branch reuse broken): %v", err)
+	}
+	defer wm.Remove(wt2)
+
+	if wt2.Branch != "aios/task/002-resume" {
+		t.Errorf("resumed worktree branch = %q, want aios/task/002-resume", wt2.Branch)
+	}
+}

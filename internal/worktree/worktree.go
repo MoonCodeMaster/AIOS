@@ -28,11 +28,21 @@ func (m *Manager) Create(taskID, fromBranch string) (*Worktree, error) {
 	if err := os.MkdirAll(m.Root, 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir worktrees root: %w", err)
 	}
-	branch := "aios/task/" + taskID
+	branch := taskBranchPrefix + taskID
 	path := filepath.Join(m.Root, taskID)
 	g := &Git{Dir: m.RepoDir}
-	if _, err := g.Run("worktree", "add", "-b", branch, path, fromBranch); err != nil {
-		return nil, err
+	// Resume case: a previous run blocked, the worktree was removed, but the
+	// branch was preserved (so the user can inspect history). On resume,
+	// `git worktree add -b` would fail because the branch already exists.
+	// Detect it and attach the worktree to the existing branch instead.
+	if _, err := g.Run("show-ref", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
+		if _, err := g.Run("worktree", "add", path, branch); err != nil {
+			return nil, err
+		}
+	} else {
+		if _, err := g.Run("worktree", "add", "-b", branch, path, fromBranch); err != nil {
+			return nil, err
+		}
 	}
 	return &Worktree{TaskID: taskID, Branch: branch, Path: path}, nil
 }
