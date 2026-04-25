@@ -31,7 +31,7 @@ func fakeExec(stdout string, exitCode int) func(name string, args ...string) *ex
 
 func TestCLIHost_OpenPR_HappyPath(t *testing.T) {
 	host := &CLIHost{
-		exec: fakeExec(`{"number":42,"url":"https://github.com/owner/repo/pull/42"}`, 0),
+		exec: fakeExec("https://github.com/owner/repo/pull/42\n", 0),
 	}
 	pr, err := host.OpenPR(context.Background(), "main", "aios/staging", "title", "body")
 	if err != nil {
@@ -48,6 +48,33 @@ func TestCLIHost_OpenPR_HappyPath(t *testing.T) {
 	}
 	if pr.Base != "main" {
 		t.Errorf("PR.Base = %q, want main", pr.Base)
+	}
+}
+
+func TestCLIHost_OpenPR_DoesNotPassJSONFlag(t *testing.T) {
+	var capturedArgs []string
+	host := &CLIHost{
+		exec: func(name string, args ...string) *exec.Cmd {
+			capturedArgs = append([]string{name}, args...)
+			return fakeExec("https://github.com/owner/repo/pull/1\n", 0)(name, args...)
+		},
+	}
+	if _, err := host.OpenPR(context.Background(), "main", "feat", "t", "b"); err != nil {
+		t.Fatalf("OpenPR: %v", err)
+	}
+	for _, a := range capturedArgs {
+		if a == "--json" {
+			t.Errorf("OpenPR must not pass --json (real gh pr create rejects it); args = %v", capturedArgs)
+		}
+	}
+}
+
+func TestCLIHost_OpenPR_RejectsMalformedURL(t *testing.T) {
+	host := &CLIHost{
+		exec: fakeExec("not-a-url\n", 0),
+	}
+	if _, err := host.OpenPR(context.Background(), "main", "feat", "t", "b"); err == nil {
+		t.Fatal("OpenPR should fail when gh's output is not a recognisable PR URL")
 	}
 }
 

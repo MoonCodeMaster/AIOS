@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -32,31 +34,30 @@ func (h *CLIHost) cmd(ctx context.Context, name string, args ...string) *exec.Cm
 	return exec.CommandContext(ctx, name, args...)
 }
 
-// ghPRJSON matches the subset of `gh pr create --json number,url` output we use.
-type ghPRJSON struct {
-	Number int    `json:"number"`
-	URL    string `json:"url"`
-}
-
 func (h *CLIHost) OpenPR(ctx context.Context, base, head, title, body string) (*PR, error) {
 	cmd := h.cmd(ctx, "gh", "pr", "create",
 		"--base", base,
 		"--head", head,
 		"--title", title,
 		"--body", body,
-		"--json", "number,url",
 	)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh pr create: %w", err)
 	}
-	var parsed ghPRJSON
-	if err := json.Unmarshal(out, &parsed); err != nil {
-		return nil, fmt.Errorf("gh pr create: parse json: %w (raw: %q)", err, string(out))
+	url := strings.TrimSpace(string(out))
+	idx := strings.Index(url, "/pull/")
+	if idx < 0 {
+		return nil, fmt.Errorf("gh pr create: cannot parse PR number from %q: missing /pull/ segment", string(out))
+	}
+	parts := strings.Split(url, "/")
+	n, err := strconv.Atoi(parts[len(parts)-1])
+	if err != nil {
+		return nil, fmt.Errorf("gh pr create: cannot parse PR number from %q: %w", string(out), err)
 	}
 	return &PR{
-		Number: parsed.Number,
-		URL:    parsed.URL,
+		Number: n,
+		URL:    url,
 		Head:   head,
 		Base:   base,
 	}, nil
