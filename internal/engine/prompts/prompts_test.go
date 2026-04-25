@@ -205,6 +205,24 @@ func TestRender_Decompose_HasSeparatorRule(t *testing.T) {
 	)
 }
 
+func TestRender_DecomposeStuck(t *testing.T) {
+	out, err := Render("decompose-stuck.tmpl", map[string]any{
+		"ParentID":   "005",
+		"ParentBody": "Add a /health endpoint with a unit test.",
+		"Issues":     []string{"missing test for 500 case", "handler signature wrong"},
+		"LastDiff":   "diff --git a/handler.go b/handler.go\n+func Health() {}",
+		"Acceptance": []string{"endpoint returns 200", "test covers 500"},
+	})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	for _, want := range []string{"005", "/health", "missing test for 500", "===TASK===", "depends_on", "depth"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("decompose-stuck.tmpl output missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
 func TestRender_Unknown(t *testing.T) {
 	_, err := Render("nope.tmpl", nil)
 	if err == nil {

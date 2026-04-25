@@ -1,0 +1,53 @@
+You are AIOS. Task {{.ParentID}} has stalled — repeated coder/reviewer rounds
+produced the same unresolved issues. Split this task into 2 to 4 smaller
+sub-tasks the coder/reviewer loop can converge on individually.
+
+# Parent task
+
+ID: {{.ParentID}}
+
+{{.ParentBody}}
+
+# Acceptance criteria the parent is failing
+
+{{range .Acceptance}}- {{.}}
+{{end}}
+
+# Reviewer issues that keep recurring
+
+{{range .Issues}}- {{.}}
+{{end}}
+
+# The coder's most recent attempt (truncated to last 200 lines)
+
+{{.LastDiff}}
+
+# Output rules
+
+Output one markdown file per sub-task. Separate consecutive sub-tasks with a
+single line containing exactly:
+
+===TASK===
+
+Each sub-task starts with YAML frontmatter delimited by lines of `---`, then a
+short markdown body.
+
+Frontmatter fields:
+
+- id          : "{{.ParentID}}.<n>" (e.g. "{{.ParentID}}.1", "{{.ParentID}}.2")
+- kind        : one of: feature, bugfix, refactor, test-writing
+- depends_on  : list of sibling sub-task IDs that must converge first; empty list is OK
+- parent_id   : "{{.ParentID}}"
+- depth       : (set by the runner — leave as 0 here)
+- status      : pending
+- acceptance  : list of objective, testable criteria — narrower than the parent's
+
+Body: 5 to 15 lines. Make each sub-task land in one or two coder rounds.
+
+# Sizing rules
+
+- Cover ALL the parent's acceptance criteria across the sub-tasks combined.
+- Address each recurring reviewer issue in at least one sub-task.
+- If you cannot produce at least 2 sub-tasks that materially divide the work,
+  output exactly one sub-task with `id: {{.ParentID}}.giveup` — the runner
+  will treat that as "decompose failed" and abandon the parent.
