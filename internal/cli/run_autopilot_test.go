@@ -128,6 +128,16 @@ func (h *timeoutHost) MergePR(context.Context, *githost.PR, githost.MergeMode) e
 	h.merged = true
 	return nil
 }
+func (*timeoutHost) ListLabeled(context.Context, string) ([]githost.Issue, error) {
+	return nil, nil
+}
+func (*timeoutHost) AddLabel(context.Context, int, string) error    { return nil }
+func (*timeoutHost) RemoveLabel(context.Context, int, string) error { return nil }
+func (*timeoutHost) AddComment(context.Context, int, string) error  { return nil }
+func (*timeoutHost) OpenIssue(context.Context, string, string, []string) (int, error) {
+	return 0, nil
+}
+func (*timeoutHost) CloseIssue(context.Context, int) error { return nil }
 
 func TestAutopilotTailPartitioning(t *testing.T) {
 	// Build a synthetic rep.Blocked with all four shapes:

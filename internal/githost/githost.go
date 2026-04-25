@@ -27,6 +27,15 @@ type PR struct {
 	Base   string // base branch, e.g. main
 }
 
+// Issue identifies a GitHub issue.
+type Issue struct {
+	Number int
+	Title  string
+	Body   string
+	Labels []string
+	URL    string
+}
+
 // ChecksState summarises the aggregate result of all required checks on a PR
 // at a single polling moment. It is a value type so callers can compare it.
 type ChecksState string
@@ -59,5 +68,24 @@ type Host interface {
 	// a safety invariant of the autopilot — the caller should have verified
 	// state with WaitForChecks first, but MergePR is the last line of defence.
 	MergePR(ctx context.Context, pr *PR, mode MergeMode) error
+
+	// ListLabeled returns issues currently carrying the given label. The
+	// label is matched exactly. Closed issues are excluded.
+	ListLabeled(ctx context.Context, label string) ([]Issue, error)
+
+	// AddLabel adds the label to the issue. No-op if already present.
+	AddLabel(ctx context.Context, issueNum int, label string) error
+
+	// RemoveLabel removes the label from the issue. No-op if not present.
+	RemoveLabel(ctx context.Context, issueNum int, label string) error
+
+	// AddComment posts a comment on the issue.
+	AddComment(ctx context.Context, issueNum int, body string) error
+
+	// OpenIssue creates a new issue and returns its number.
+	OpenIssue(ctx context.Context, title, body string, labels []string) (int, error)
+
+	// CloseIssue closes the issue (state = "closed").
+	CloseIssue(ctx context.Context, issueNum int) error
 }
 
