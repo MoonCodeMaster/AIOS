@@ -38,6 +38,8 @@ func newRunCmd() *cobra.Command {
 	c.Flags().StringSlice("mcp-allow", nil, "run-wide MCP server allowlist (intersected with per-task mcp_allow)")
 	c.Flags().Bool("no-mcp", false, "disable all MCP for this run")
 	c.Flags().Int("max-tokens-run", 0, "override [parallel] max_tokens_per_run (0 = use config)")
+	c.Flags().Bool("autopilot", false, "drop stalled tasks instead of blocking with [NEEDS HUMAN]")
+	c.Flags().Bool("merge", false, "after a successful run, open PR aios/staging→main, wait for CI, squash-merge")
 	return c
 }
 
@@ -64,6 +66,10 @@ func runMain(cmd *cobra.Command, args []string) error {
 	if mtr, _ := cmd.Flags().GetInt("max-tokens-run"); mtr > 0 {
 		runTokenCap = mtr
 	}
+
+	autopilot, _ := cmd.Flags().GetBool("autopilot")
+	mergeAfter, _ := cmd.Flags().GetBool("merge")
+	_ = mergeAfter // wired in Task 9/10
 
 	// --- MCP flags ---
 	mcpServers := cfg.MCP.Servers
@@ -343,6 +349,31 @@ func runMain(cmd *cobra.Command, args []string) error {
 		}
 
 		if outcome.Final != orchestrator.StateConverged {
+			// Autopilot mode rescues stall blocks: write the audit trail to
+			// .aios/runs/<id>/abandoned/<task>/, mark the task abandoned, and
+			// let the rest of the run proceed. Non-stall blocks (budget,
+			// engine errors, git failures) still terminate this task.
+			if autopilot && outcome.BlockReason != nil && autopilotRescues(outcome.BlockReason.Code) {
+				info := run.AbandonedInfo{
+					TaskID:      tk.ID,
+					Reason:      outcome.Reason,
+					BlockCode:   string(outcome.BlockReason.Code),
+					UsageTokens: outcome.UsageTokens,
+					Rounds:      summarizeRoundsForAbandon(outcome.Rounds),
+				}
+				if werr := run.WriteAbandoned(rec, info); werr != nil {
+					fmt.Fprintf(os.Stderr, "warn: write abandoned artifact for %s: %v\n", tk.ID, werr)
+				}
+				tk.Status = "abandoned"
+				_ = updateTaskFile(tk)
+				fmt.Printf("⚠ task %s ABANDONED (autopilot): %s\n", tk.ID, outcome.Reason)
+				return orchestrator.TaskResult{
+					ID:          id,
+					Status:      "abandoned",
+					Reason:      outcome.Reason,
+					BlockReason: outcome.BlockReason,
+				}, nil
+			}
 			tk.Status = "blocked"
 			rpt := buildReport(tk, outcome)
 			_ = rec.WriteTaskFile(tk.ID, "report.md", []byte(run.RenderReport(rpt)))
@@ -647,4 +678,30 @@ func replaceStatusInFrontmatter(src, newStatus string) string {
 		}
 	}
 	return src
+}
+
+// autopilotRescues returns true when a block code represents a "stall" that
+// autopilot mode should convert into an abandoned-task drop. All other codes
+// (budget exhaustion, engine errors, git failures, upstream blocks) are real
+// errors that should terminate the task even in autopilot — they are not
+// "the model couldn't make the reviewer happy" cases.
+func autopilotRescues(code orchestrator.BlockCode) bool {
+	return code == orchestrator.CodeStallNoProgress
+}
+
+// summarizeRoundsForAbandon converts orchestrator round records to the
+// flatter form WriteAbandoned expects. Full prompts and responses are
+// already persisted under round-N/; this is just an index.
+func summarizeRoundsForAbandon(rs []orchestrator.RoundRecord) []run.AbandonedRound {
+	out := make([]run.AbandonedRound, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, run.AbandonedRound{
+			N:              r.N,
+			ReviewApproved: r.Review.Approved,
+			IssueCount:     len(r.Review.Issues),
+			VerifyGreen:    verify.AllGreen(r.Checks),
+			Escalated:      r.Escalated,
+		})
+	}
+	return out
 }
