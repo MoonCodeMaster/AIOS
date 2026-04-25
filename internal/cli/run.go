@@ -396,10 +396,6 @@ func runMain(cmd *cobra.Command, args []string) error {
 			}, nil
 		}
 
-		// Compute the diff for the MergeRequest BEFORE committing (the commit
-		// changes what wm.Diff returns against the branch).
-		diff, _ := wm.Diff(wt, cfg.Project.StagingBranch)
-
 		// Commit on the task branch.
 		g := &worktree.Git{Dir: wt.Path}
 		if _, err := g.Run("add", "-A"); err != nil {
@@ -409,9 +405,8 @@ func runMain(cmd *cobra.Command, args []string) error {
 			return blockedTask(id, orchestrator.CodeCommitFailed, err.Error()), nil
 		}
 
-		// Recompute diff post-commit for the MergeRequest (HEAD..staging).
+		// Compute the diff post-commit for the MergeRequest (HEAD..staging).
 		postDiff, _ := wm.Diff(wt, cfg.Project.StagingBranch)
-		_ = diff // pre-commit diff kept for reference; post-commit is authoritative
 
 		tk.Status = "converged"
 		_ = updateTaskFile(tk)
@@ -854,6 +849,9 @@ func writeAutopilotSummary(rec *run.Recorder, fres *finalizerResult, finalizerEr
 		fmt.Fprintf(&b, "PR: %s\n", fres.PR.URL)
 		fmt.Fprintf(&b, "Checks: %s\n", fres.State)
 		fmt.Fprintf(&b, "Merged: %v\n", fres.Merged)
+	}
+	if fres.SkipReason == "" && fres.PR == nil {
+		b.WriteString("PR: not opened (gh pr create failed)\n")
 	}
 	if finalizerErr != nil {
 		fmt.Fprintf(&b, "\nError: %v\n", finalizerErr)

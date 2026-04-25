@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -151,6 +150,3 @@ func commitNewSpec(wd, staging, idea string) error {
 	msg := "aios: spec and tasks for " + idea
 	return exec.Command("git", "-C", wd, "commit", "-m", msg).Run()
 }
-
-// keep bufio import used somewhere
-var _ = bufio.NewReader
