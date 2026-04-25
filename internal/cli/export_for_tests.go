@@ -22,3 +22,7 @@ func RunAutopilotFinalizerForTest(ctx context.Context, opts FinalizerOptsForTest
 func WriteAutopilotSummaryForTest(rec *run.Recorder, res *FinalizerResultForTest, finalizerErr error) error {
 	return writeAutopilotSummary(rec, res, finalizerErr)
 }
+
+// ApplyServeDefaultsForTest exposes applyServeDefaults to integration tests.
+// Production code must not depend on it.
+func ApplyServeDefaultsForTest(c *ServeConfig) { applyServeDefaults(c) }
