@@ -15,6 +15,7 @@ import (
 	"github.com/MoonCodeMaster/AIOS/internal/config"
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/MoonCodeMaster/AIOS/internal/engine/prompts"
+	"github.com/MoonCodeMaster/AIOS/internal/githost"
 	"github.com/MoonCodeMaster/AIOS/internal/mcp"
 	"github.com/MoonCodeMaster/AIOS/internal/orchestrator"
 	"github.com/MoonCodeMaster/AIOS/internal/run"
@@ -704,4 +705,52 @@ func summarizeRoundsForAbandon(rs []orchestrator.RoundRecord) []run.AbandonedRou
 		})
 	}
 	return out
+}
+
+// finalizerOpts is the input to runAutopilotFinalizer. Decoupled from runMain
+// so the finalizer is unit-testable without spinning up an orchestrator run.
+type finalizerOpts struct {
+	Host           githost.Host
+	Base           string
+	Head           string
+	Title          string
+	Body           string
+	ConvergedCount int           // skip everything when 0
+	ChecksTimeout  time.Duration // 30 min if zero
+}
+
+// finalizerResult reports what the finalizer did. PR is non-nil whenever a
+// PR was opened (even if it was not merged, e.g. CI red).
+type finalizerResult struct {
+	PR         *githost.PR
+	State      githost.ChecksState // pending|green|red — green implies Merged
+	Merged     bool
+	SkipReason string // populated when PR is nil (e.g. "no converged tasks")
+}
+
+func runAutopilotFinalizer(ctx context.Context, opts finalizerOpts) (*finalizerResult, error) {
+	if opts.ConvergedCount == 0 {
+		return &finalizerResult{SkipReason: "no converged tasks"}, nil
+	}
+	if opts.ChecksTimeout == 0 {
+		opts.ChecksTimeout = 30 * time.Minute
+	}
+	pr, err := opts.Host.OpenPR(ctx, opts.Base, opts.Head, opts.Title, opts.Body)
+	if err != nil {
+		return &finalizerResult{}, fmt.Errorf("open PR %s→%s: %w", opts.Head, opts.Base, err)
+	}
+	res := &finalizerResult{PR: pr}
+	state, err := opts.Host.WaitForChecks(ctx, pr, opts.ChecksTimeout)
+	if err != nil {
+		return res, fmt.Errorf("wait for PR #%d checks: %w", pr.Number, err)
+	}
+	res.State = state
+	if state != githost.ChecksGreen {
+		return res, fmt.Errorf("PR #%d checks ended %s; not merging — see %s", pr.Number, state, pr.URL)
+	}
+	if err := opts.Host.MergePR(ctx, pr, githost.MergeSquash); err != nil {
+		return res, fmt.Errorf("merge PR #%d: %w", pr.Number, err)
+	}
+	res.Merged = true
+	return res, nil
 }
