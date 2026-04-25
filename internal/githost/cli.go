@@ -130,7 +130,22 @@ func aggregateChecks(rows []ghCheckRow) ChecksState {
 	return ChecksPending
 }
 
-// MergePR is implemented in subsequent tasks.
 func (h *CLIHost) MergePR(ctx context.Context, pr *PR, mode MergeMode) error {
-	return fmt.Errorf("MergePR: not implemented")
+	flag := ""
+	switch mode {
+	case MergeSquash:
+		flag = "--squash"
+	case MergeMerge:
+		flag = "--merge"
+	case MergeRebase:
+		flag = "--rebase"
+	default:
+		return fmt.Errorf("unknown merge mode %q", mode)
+	}
+	cmd := h.cmd(ctx, "gh", "pr", "merge", fmt.Sprintf("%d", pr.Number), flag, "--delete-branch")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr merge: %w (output: %q)", err, string(out))
+	}
+	return nil
 }

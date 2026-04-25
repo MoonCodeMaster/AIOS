@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -114,5 +115,31 @@ func TestCLIHost_WaitForChecks_TimeoutWhenAllPending(t *testing.T) {
 	_, err := host.WaitForChecks(context.Background(), &PR{Number: 1}, 30*time.Millisecond)
 	if !errors.Is(err, ErrChecksTimeout) {
 		t.Errorf("err = %v, want ErrChecksTimeout", err)
+	}
+}
+
+func TestCLIHost_MergePR_SquashCallsCorrectFlags(t *testing.T) {
+	var captured []string
+	host := &CLIHost{
+		exec: func(name string, args ...string) *exec.Cmd {
+			captured = append([]string{name}, args...)
+			return fakeExec("", 0)(name, args...)
+		},
+	}
+	err := host.MergePR(context.Background(), &PR{Number: 7}, MergeSquash)
+	if err != nil {
+		t.Fatalf("MergePR: %v", err)
+	}
+	want := []string{"gh", "pr", "merge", "7", "--squash", "--delete-branch"}
+	if !reflect.DeepEqual(captured, want) {
+		t.Errorf("invocation = %v, want %v", captured, want)
+	}
+}
+
+func TestCLIHost_MergePR_GhFailureSurfaces(t *testing.T) {
+	host := &CLIHost{exec: fakeExec("", 1)}
+	err := host.MergePR(context.Background(), &PR{Number: 7}, MergeSquash)
+	if err == nil {
+		t.Fatal("MergePR should fail when gh exits non-zero")
 	}
 }
