@@ -121,6 +121,22 @@ git log aios/staging               # audit the coder↔reviewer history
 git merge aios/staging             # you're the last human in the loop
 ```
 
+## Autopilot mode (no human input)
+
+For end-to-end runs with no prompts and no manual `git merge`:
+
+```bash
+cd your-repo
+aios init
+aios autopilot "Add a /health endpoint with a unit test"
+# spec → tasks → coder↔reviewer → PR → CI → merge to main
+# Stalled tasks abandon locally with a full audit trail; the rest of the run
+# proceeds. CI red leaves the PR open and exits non-zero.
+```
+
+Requires: `gh` CLI authenticated (`gh auth login`) and a configured git remote.
+Stalled tasks land under `.aios/runs/<id>/abandoned/<task>/` for later review.
+
 ## What a run actually produces
 
 ```
@@ -258,10 +274,12 @@ Codex through a small corpus of scenarios; see [`docs/e2e-setup.md`](docs/e2e-se
 
 Known limitations in the current release:
 
-- `--sandbox` (container isolation) is stubbed.
-- Auto-decompose for stuck tasks is not yet implemented; blocked tasks
-  currently surface as `[NEEDS HUMAN]` for manual split.
-- MCP call failures are not yet surfaced inside the reviewer prompt.
+- Auto-decompose for stuck tasks is shipping in v0.3.0; in autopilot mode (v0.2.0)
+  stalled tasks are abandoned with a full audit trail rather than blocking the run.
+- `--sandbox` (container isolation) remains stubbed; per-task `git worktree`
+  isolation continues to be the v0.x story.
+- MCP call failures are surfaced in audit logs; surfacing them inside the
+  reviewer prompt is shipping in v0.3.1.
 
 ## Contributing
 
