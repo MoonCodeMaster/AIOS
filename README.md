@@ -139,6 +139,42 @@ aios autopilot "Add a /health endpoint with a unit test"
 Requires: `gh` CLI authenticated (`gh auth login`) and a configured git remote.
 Stalled tasks land under `.aios/runs/<id>/abandoned/<task>/` for later review.
 
+## Architect mode (one keystroke from idea to merged PR)
+
+Where `aios autopilot` takes one idea and runs the first reasonable plan, `aios
+architect` takes one idea and gives you **three deliberately different mind
+maps** to choose between — each one stress-tested by both Claude and Codex
+before you ever see it.
+
+```bash
+cd your-repo
+aios init
+aios architect "Build a Slack bot that posts daily standups from GitHub activity"
+# 1. Claude and Codex each propose blueprints in parallel.
+# 2. Each model critiques the OTHER's proposals.
+# 3. Each author refines its own from the critique.
+# 4. The reviewer-default model synthesises three finalists:
+#    1) conservative   2) balanced   3) ambitious
+# Pick blueprint [1/2/3]: 2
+# spec → tasks → coder↔reviewer → PR → CI → merge to main, no further prompts.
+```
+
+Add `--auto` (or `--pick N`) for fully unattended runs. Every round's prompt
+and raw response is persisted under `.aios/runs/<id>/architect/` so you can
+inspect exactly what each model said at every step. Same `gh` + git-remote
+requirements as autopilot.
+
+Why this beats running `claude` or `codex` directly:
+
+- **Three mental models, not one.** Single-model planning gives you the first
+  reasonable answer. Architect gives you a conservative, a balanced, and an
+  ambitious framing — picked for distinctness, not just diversity of wording.
+- **Mutual critique baked in.** Each blueprint has been read and challenged by
+  the *other* engine before it reaches you, so the obvious gaps are already
+  closed.
+- **One keystroke to merged PR.** After you pick, the same coder↔reviewer
+  loop, worktree isolation, audit trail, and PR-merge pipeline run for free.
+
 ### Auto-decompose for stalled tasks
 
 When a task stalls — repeated rounds raise the same unresolved reviewer issues
