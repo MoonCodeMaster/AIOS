@@ -123,6 +123,64 @@ func TestWorktree_ListAndPruneStale(t *testing.T) {
 	}
 }
 
+// seedRepoForTest is a minimal helper for worktree tests; it inits a repo with
+// a single seed commit on `main` plus an `aios/staging` branch.
+func seedRepoForTest(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	mustGit := func(args ...string) {
+		t.Helper()
+		g := &Git{Dir: dir}
+		if _, err := g.Run(args...); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	mustGit("init", "-b", "main")
+	mustGit("config", "user.email", "t@t")
+	mustGit("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit("add", ".")
+	mustGit("commit", "-m", "init")
+	mustGit("branch", "aios/staging")
+	return dir
+}
+
+// TestDiff_IncludesUncommittedAndUntracked is the regression test for the
+// reviewer-diff-empty bug: the coder writes files in the worktree without
+// committing, and Diff must surface those changes so the reviewer sees them.
+func TestDiff_IncludesUncommittedAndUntracked(t *testing.T) {
+	repo := seedRepoForTest(t)
+	wm := &Manager{RepoDir: repo, Root: filepath.Join(repo, ".aios", "worktrees")}
+
+	wt, err := wm.Create("001-feat", "aios/staging")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer wm.Remove(wt)
+
+	// Untracked new file (the common coder output).
+	if err := os.WriteFile(filepath.Join(wt.Path, "new.go"), []byte("package main\n\nfunc Hello() string { return \"world\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Modify an existing tracked file.
+	if err := os.WriteFile(filepath.Join(wt.Path, "README.md"), []byte("hi\n# new heading\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := wm.Diff(wt, "aios/staging")
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+
+	for _, want := range []string{"new.go", "func Hello", "new heading"} {
+		if !strings.Contains(diff, want) {
+			t.Errorf("Diff is missing %q (the reviewer would not see this work)\n--- diff ---\n%s", want, diff)
+		}
+	}
+}
+
 func TestWorktree_MergeFF(t *testing.T) {
 	repo := initRepo(t)
 	m := &Manager{RepoDir: repo, Root: filepath.Join(repo, ".aios", "worktrees")}

@@ -58,10 +58,37 @@ func (m *Manager) MergeFF(w *Worktree, target string) error {
 	return nil
 }
 
-// Diff returns the patch introduced on the worktree's branch since fromBranch.
+// Diff returns the patch from fromBranch to the worktree's current working
+// tree state — including uncommitted modifications and untracked files. The
+// coder prompt instructs the model NOT to commit, so the reviewer sees the
+// in-progress patch from the working tree, not a stale ref-to-ref diff.
+//
+// Untracked files are exposed via `git add -N` (intent-to-add): non-destructive,
+// no content is staged, but `git diff` then includes the new files as additions.
 func (m *Manager) Diff(w *Worktree, fromBranch string) (string, error) {
-	g := &Git{Dir: m.RepoDir}
-	return g.Run("diff", fromBranch+".."+w.Branch)
+	g := &Git{Dir: w.Path}
+	// 1. Mark untracked files as intent-to-add so they appear in the diff.
+	st, err := g.Run("status", "--porcelain")
+	if err != nil {
+		return "", fmt.Errorf("worktree status: %w", err)
+	}
+	for _, ln := range strings.Split(st, "\n") {
+		ln = strings.TrimRight(ln, "\r")
+		if !strings.HasPrefix(ln, "?? ") {
+			continue
+		}
+		path := strings.TrimPrefix(ln, "?? ")
+		if path == "" {
+			continue
+		}
+		if _, err := g.Run("add", "-N", "--", path); err != nil {
+			// Non-fatal: the file just won't show up. A reviewer seeing a
+			// partial diff is still better than failing the whole round.
+			continue
+		}
+	}
+	// 2. Diff from fromBranch to the working tree (HEAD + uncommitted + intent-to-add).
+	return g.Run("diff", fromBranch)
 }
 
 // List returns every worktree in the repo that belongs to AIOS — identified
