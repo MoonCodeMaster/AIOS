@@ -61,28 +61,3 @@ type Host interface {
 	MergePR(ctx context.Context, pr *PR, mode MergeMode) error
 }
 
-// CLIHost and FakeHost are declared in cli.go and fake.go respectively.
-// Empty placeholder structs here so the interface assertions in tests
-// compile before those files are written.
-type CLIHost struct{ _ struct{} }
-type FakeHost struct{ _ struct{} }
-
-func (*CLIHost) OpenPR(context.Context, string, string, string, string) (*PR, error) {
-	return nil, errors.New("not implemented")
-}
-func (*CLIHost) WaitForChecks(context.Context, *PR, time.Duration) (ChecksState, error) {
-	return "", errors.New("not implemented")
-}
-func (*CLIHost) MergePR(context.Context, *PR, MergeMode) error {
-	return errors.New("not implemented")
-}
-
-func (*FakeHost) OpenPR(context.Context, string, string, string, string) (*PR, error) {
-	return nil, errors.New("not implemented")
-}
-func (*FakeHost) WaitForChecks(context.Context, *PR, time.Duration) (ChecksState, error) {
-	return "", errors.New("not implemented")
-}
-func (*FakeHost) MergePR(context.Context, *PR, MergeMode) error {
-	return errors.New("not implemented")
-}
