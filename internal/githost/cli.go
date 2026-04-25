@@ -18,7 +18,8 @@ var _ Host = (*CLIHost)(nil)
 type CLIHost struct {
 	// exec is the command builder. Real usage leaves it nil and falls back to
 	// exec.Command. Tests inject a fake to avoid spawning real `gh` processes.
-	exec func(name string, args ...string) *exec.Cmd
+	exec      func(name string, args ...string) *exec.Cmd
+	pollEvery time.Duration // 0 = use default (10s)
 }
 
 // NewCLIHost returns a CLIHost using the real `os/exec` package.
@@ -61,10 +62,75 @@ func (h *CLIHost) OpenPR(ctx context.Context, base, head, title, body string) (*
 	}, nil
 }
 
-// WaitForChecks and MergePR are implemented in subsequent tasks.
-func (h *CLIHost) WaitForChecks(ctx context.Context, pr *PR, timeout time.Duration) (ChecksState, error) {
-	return "", fmt.Errorf("WaitForChecks: not implemented")
+// ghCheckRow matches the subset of `gh pr checks --json bucket` output we use.
+// `bucket` is `pass | fail | pending | skipping | cancel`.
+type ghCheckRow struct {
+	Bucket string `json:"bucket"`
 }
+
+// pollInterval returns the configured polling cadence, defaulting to 10s.
+// Tests override via the unexported pollEvery field to drive timeout paths
+// quickly.
+func (h *CLIHost) pollInterval() time.Duration {
+	if h.pollEvery > 0 {
+		return h.pollEvery
+	}
+	return 10 * time.Second
+}
+
+func (h *CLIHost) WaitForChecks(ctx context.Context, pr *PR, timeout time.Duration) (ChecksState, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		cmd := h.cmd(ctx, "gh", "pr", "checks", fmt.Sprintf("%d", pr.Number), "--json", "bucket")
+		out, err := cmd.Output()
+		if err != nil {
+			return "", fmt.Errorf("gh pr checks: %w", err)
+		}
+		var rows []ghCheckRow
+		if err := json.Unmarshal(out, &rows); err != nil {
+			return "", fmt.Errorf("gh pr checks: parse json: %w (raw: %q)", err, string(out))
+		}
+		state := aggregateChecks(rows)
+		if state != ChecksPending {
+			return state, nil
+		}
+		if time.Now().After(deadline) {
+			return "", ErrChecksTimeout
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(h.pollInterval()):
+		}
+	}
+}
+
+// aggregateChecks applies the precedence rule: any fail/cancel → red; all
+// pass/skipping with ≥1 row → green; otherwise pending (keep polling). Empty
+// input is pending — gh returns [] for the brief window between PR open and
+// the first check kicking off.
+func aggregateChecks(rows []ghCheckRow) ChecksState {
+	if len(rows) == 0 {
+		return ChecksPending
+	}
+	allPass := true
+	for _, r := range rows {
+		switch r.Bucket {
+		case "fail", "cancel":
+			return ChecksRed
+		case "pass", "skipping":
+			// counted as green-equivalent
+		default:
+			allPass = false
+		}
+	}
+	if allPass {
+		return ChecksGreen
+	}
+	return ChecksPending
+}
+
+// MergePR is implemented in subsequent tasks.
 func (h *CLIHost) MergePR(ctx context.Context, pr *PR, mode MergeMode) error {
 	return fmt.Errorf("MergePR: not implemented")
 }

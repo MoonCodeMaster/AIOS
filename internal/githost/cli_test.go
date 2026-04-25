@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeExec returns a command builder that produces a process which
@@ -77,4 +78,41 @@ func TestHelperProcess(t *testing.T) {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+func TestCLIHost_WaitForChecks_GreenOnFirstPoll(t *testing.T) {
+	host := &CLIHost{
+		exec: fakeExec(`[{"bucket":"pass"},{"bucket":"pass"}]`, 0),
+	}
+	state, err := host.WaitForChecks(context.Background(), &PR{Number: 1}, 1*time.Second)
+	if err != nil {
+		t.Fatalf("WaitForChecks: %v", err)
+	}
+	if state != ChecksGreen {
+		t.Errorf("state = %q, want %q", state, ChecksGreen)
+	}
+}
+
+func TestCLIHost_WaitForChecks_RedShortCircuits(t *testing.T) {
+	host := &CLIHost{
+		exec: fakeExec(`[{"bucket":"pass"},{"bucket":"fail"}]`, 0),
+	}
+	state, err := host.WaitForChecks(context.Background(), &PR{Number: 1}, 1*time.Second)
+	if err != nil {
+		t.Fatalf("WaitForChecks: %v", err)
+	}
+	if state != ChecksRed {
+		t.Errorf("state = %q, want %q", state, ChecksRed)
+	}
+}
+
+func TestCLIHost_WaitForChecks_TimeoutWhenAllPending(t *testing.T) {
+	host := &CLIHost{
+		exec:      fakeExec(`[{"bucket":"pending"}]`, 0),
+		pollEvery: 10 * time.Millisecond,
+	}
+	_, err := host.WaitForChecks(context.Background(), &PR{Number: 1}, 30*time.Millisecond)
+	if !errors.Is(err, ErrChecksTimeout) {
+		t.Errorf("err = %v, want ErrChecksTimeout", err)
+	}
 }
