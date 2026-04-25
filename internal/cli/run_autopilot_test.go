@@ -124,3 +124,54 @@ func (h *timeoutHost) MergePR(context.Context, *githost.PR, githost.MergeMode) e
 	h.merged = true
 	return nil
 }
+
+func TestAutopilotTailPartitioning(t *testing.T) {
+	// Build a synthetic rep.Blocked with all four shapes:
+	// - real-blocked task
+	// - cascade from real-blocked task (CodeUpstreamBlocked, Upstream=real)
+	// - autopilot-abandoned task (CodeAbandonedAutopilot)
+	// - cascade from abandoned task (CodeUpstreamBlocked, Upstream=abandoned)
+	blocked := map[orchestrator.TaskID]orchestrator.BlockReason{
+		"realA":         {Code: orchestrator.CodeMaxTokensExceeded, Detail: "tokens"},
+		"realA_dep":     {Code: orchestrator.CodeUpstreamBlocked, Upstream: "realA"},
+		"abandoned":     {Code: orchestrator.CodeAbandonedAutopilot, Detail: "stall"},
+		"abandoned_dep": {Code: orchestrator.CodeUpstreamBlocked, Upstream: "abandoned"},
+	}
+
+	// Replicate the partition logic.
+	abandonedIDs := map[orchestrator.TaskID]bool{}
+	for id, br := range blocked {
+		if br.Code == orchestrator.CodeAbandonedAutopilot {
+			abandonedIDs[id] = true
+		}
+	}
+	realBlocked := map[orchestrator.TaskID]orchestrator.BlockReason{}
+	for id, br := range blocked {
+		if abandonedIDs[id] {
+			continue
+		}
+		if br.Code == orchestrator.CodeUpstreamBlocked && abandonedIDs[br.Upstream] {
+			continue
+		}
+		realBlocked[id] = br
+	}
+
+	if !abandonedIDs["abandoned"] {
+		t.Error("abandoned task should be in abandonedIDs")
+	}
+	if abandonedIDs["realA"] {
+		t.Error("realA must not be classified as abandoned")
+	}
+	if _, ok := realBlocked["realA"]; !ok {
+		t.Error("realA must remain in realBlocked")
+	}
+	if _, ok := realBlocked["realA_dep"]; !ok {
+		t.Error("realA_dep (cascade from real block) must remain in realBlocked")
+	}
+	if _, ok := realBlocked["abandoned"]; ok {
+		t.Error("abandoned must be filtered out of realBlocked")
+	}
+	if _, ok := realBlocked["abandoned_dep"]; ok {
+		t.Error("abandoned_dep (cascade from abandon) must be filtered out of realBlocked")
+	}
+}

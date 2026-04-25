@@ -15,6 +15,13 @@ const (
 	// Review/loop control.
 	CodeStallNoProgress BlockCode = "stall_no_progress"
 
+	// Autopilot rescue. Distinct from blocks: a task that hit CodeStallNoProgress
+	// and was rescued by `--autopilot` returns Status="blocked" with this code so
+	// the scheduler cascades dependents (rather than running them on a base that
+	// doesn't contain the parent's work), but the CLI's autopilot path treats it
+	// as a non-fatal drop rather than a real block.
+	CodeAbandonedAutopilot BlockCode = "abandoned_autopilot"
+
 	// Merge queue.
 	CodeRebaseConflict        BlockCode = "rebase_conflict"
 	CodeRebaseVerifyFailed    BlockCode = "rebase_verify_failed"

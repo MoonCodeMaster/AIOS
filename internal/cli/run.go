@@ -376,10 +376,11 @@ func runMain(cmd *cobra.Command, args []string) error {
 				_ = updateTaskFile(tk)
 				fmt.Printf("⚠ task %s ABANDONED (autopilot): %s\n", tk.ID, outcome.Reason)
 				return orchestrator.TaskResult{
-					ID:          id,
-					Status:      "abandoned",
-					Reason:      outcome.Reason,
-					BlockReason: outcome.BlockReason,
+					ID:     id,
+					Status: "blocked",
+					Reason: outcome.Reason,
+					BlockReason: orchestrator.NewBlock(
+						orchestrator.CodeAbandonedAutopilot, outcome.Reason),
 				}, nil
 			}
 			tk.Status = "blocked"
@@ -492,12 +493,41 @@ func runMain(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("RunAll: %w", err)
 	}
 
-	if len(rep.Blocked) > 0 {
-		printBlockSummary(rep)
+	// Partition blocks into real failures vs autopilot-rescue drops.
+	// Autopilot-abandoned tasks AND their cascade-blocked dependents
+	// (CodeUpstreamBlocked whose Upstream is an abandoned task) are not
+	// real failures — they are the autopilot's "drop and continue" path.
+	abandonedIDs := map[orchestrator.TaskID]bool{}
+	for id, br := range rep.Blocked {
+		if br.Code == orchestrator.CodeAbandonedAutopilot {
+			abandonedIDs[id] = true
+		}
+	}
+	realBlocked := map[orchestrator.TaskID]orchestrator.BlockReason{}
+	for id, br := range rep.Blocked {
+		if abandonedIDs[id] {
+			continue
+		}
+		if br.Code == orchestrator.CodeUpstreamBlocked && abandonedIDs[br.Upstream] {
+			continue
+		}
+		realBlocked[id] = br
+	}
+
+	if len(realBlocked) > 0 {
+		printBlockSummary(&orchestrator.RunReport{Blocked: realBlocked})
 		os.Exit(2)
 	}
 
 	if autopilot && mergeAfter {
+		// All-abandoned (or some-abandoned-zero-converged) exits 2 per spec —
+		// nothing to merge, the PR would be empty.
+		if len(rep.Converged) == 0 {
+			_ = writeAutopilotSummary(rec, nil,
+				fmt.Errorf("all tasks abandoned; nothing to merge (%d abandoned)", len(abandonedIDs)))
+			fmt.Fprintf(os.Stderr, "autopilot: %d task(s) abandoned; nothing to merge\n", len(abandonedIDs))
+			os.Exit(2)
+		}
 		host := githost.NewCLIHost()
 		fres, err := runAutopilotFinalizer(runCtx, finalizerOpts{
 			Host:           host,
@@ -508,13 +538,14 @@ func runMain(cmd *cobra.Command, args []string) error {
 			ConvergedCount: len(rep.Converged),
 			ChecksTimeout:  30 * time.Minute,
 		})
-		// Always write the summary, regardless of finalizer outcome.
 		_ = writeAutopilotSummary(rec, fres, err)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "autopilot finalizer: %v\n", err)
 			os.Exit(2)
 		}
 		if fres.SkipReason != "" {
+			// Defensive — shouldn't reach here because of the all-abandoned
+			// short-circuit above, but if it does, treat as a non-fatal skip.
 			fmt.Printf("autopilot: %s; nothing to merge\n", fres.SkipReason)
 			return nil
 		}
