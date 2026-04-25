@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/MoonCodeMaster/AIOS/internal/cli/decompose"
 	"github.com/MoonCodeMaster/AIOS/internal/config"
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/MoonCodeMaster/AIOS/internal/engine/prompts"
@@ -362,6 +363,39 @@ func runMain(cmd *cobra.Command, args []string) error {
 			// let the rest of the run proceed. Non-stall blocks (budget,
 			// engine errors, git failures) still terminate this task.
 			if autopilot && outcome.BlockReason != nil && autopilotRescues(outcome.BlockReason.Code) {
+				// Try auto-decompose first (M2). On success the parent becomes
+				// "decomposed" and its children are spliced into the scheduler.
+				if tk.Depth < cfg.Budget.DecomposeDepthCap() {
+					subs, derr := tryDecompose(ctx, tk, outcome, reviewerEng, engMap)
+					if derr == nil {
+						childIDs := make([]string, 0, len(subs))
+						for _, c := range subs {
+							childIDs = append(childIDs, c.ID)
+							if werr := writeChildTaskFile(filepath.Join(wd, ".aios", "tasks"), c); werr != nil {
+								fmt.Fprintf(os.Stderr, "warn: write child task file %s: %v\n", c.ID, werr)
+							}
+							// Make children visible to subsequent taskFn invocations.
+							// The scheduler.Done call below serializes the splice (under
+							// scheduler mutex) which then enqueues children — those
+							// channel sends happen-after this map write within the same
+							// goroutine, so workers that pick up the child IDs will see
+							// the updated taskByID map without an explicit lock.
+							taskByID[c.ID] = c
+						}
+						tk.Status = "decomposed"
+						tk.DecomposedInto = childIDs
+						_ = updateTaskFile(tk)
+						fmt.Printf("⤳ task %s DECOMPOSED into %d sub-tasks: %s\n", tk.ID, len(subs), strings.Join(childIDs, ", "))
+						return orchestrator.TaskResult{
+							ID:       id,
+							Status:   "decomposed",
+							Children: subs,
+						}, nil
+					}
+					// derr falls through to abandon path below; log it.
+					fmt.Fprintf(os.Stderr, "info: decompose declined for %s: %v (falling back to abandon)\n", tk.ID, derr)
+				}
+				// M1 abandon path (depth cap reached or decompose failed).
 				info := run.AbandonedInfo{
 					TaskID:      tk.ID,
 					Reason:      outcome.Reason,
@@ -884,4 +918,75 @@ func writeAutopilotSummary(rec *run.Recorder, fres *finalizerResult, finalizerEr
 		fmt.Fprintf(&b, "\nError: %v\n", finalizerErr)
 	}
 	return rec.WriteFile("autopilot-summary.md", []byte(b.String()))
+}
+
+// tryDecompose calls the M2 auto-decompose handler. Returns a list of child
+// tasks on success, or an error (typically ErrAbandon-wrapped) on any failure
+// the caller should treat as "fall through to abandon".
+func tryDecompose(ctx context.Context, parent *spec.Task, outcome *orchestrator.Outcome, reviewer engine.Engine, engMap map[string]engine.Engine) ([]*spec.Task, error) {
+	claude, ok := engMap["claude"]
+	if !ok {
+		return nil, fmt.Errorf("decompose: claude engine not in engMap")
+	}
+	codex, ok := engMap["codex"]
+	if !ok {
+		return nil, fmt.Errorf("decompose: codex engine not in engMap")
+	}
+	synthName := reviewer.Name()
+	issuesByRound := make([][]string, 0, len(outcome.Rounds))
+	for _, r := range outcome.Rounds {
+		var notes []string
+		for _, iss := range r.Review.Issues {
+			notes = append(notes, iss.Note)
+		}
+		issuesByRound = append(issuesByRound, notes)
+	}
+	lastDiff := ""
+	if len(outcome.Rounds) > 0 {
+		lastDiff = outcome.Rounds[len(outcome.Rounds)-1].ReviewerPrompt
+	}
+	out, err := decompose.Run(ctx, decompose.Input{
+		Parent:          parent,
+		Claude:          claude,
+		Codex:           codex,
+		Synthesizer:     reviewer,
+		SynthesizerName: synthName,
+		IssuesByRound:   issuesByRound,
+		LastDiff:        lastDiff,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out.Children, nil
+}
+
+// writeChildTaskFile serialises a child task to <tasksDir>/<id>.md with the
+// minimum frontmatter the existing parser expects.
+func writeChildTaskFile(tasksDir string, t *spec.Task) error {
+	if err := os.MkdirAll(tasksDir, 0o755); err != nil {
+		return err
+	}
+	var b strings.Builder
+	fmt.Fprintln(&b, "---")
+	fmt.Fprintf(&b, "id: %s\n", t.ID)
+	fmt.Fprintf(&b, "kind: %s\n", t.Kind)
+	fmt.Fprintf(&b, "parent_id: %q\n", t.ParentID)
+	fmt.Fprintf(&b, "depth: %d\n", t.Depth)
+	fmt.Fprintf(&b, "status: %s\n", t.Status)
+	if len(t.DependsOn) > 0 {
+		fmt.Fprintln(&b, "depends_on:")
+		for _, d := range t.DependsOn {
+			fmt.Fprintf(&b, "  - %s\n", d)
+		}
+	}
+	if len(t.Acceptance) > 0 {
+		fmt.Fprintln(&b, "acceptance:")
+		for _, a := range t.Acceptance {
+			fmt.Fprintf(&b, "  - %s\n", a)
+		}
+	}
+	fmt.Fprintln(&b, "---")
+	fmt.Fprintln(&b, t.Body)
+	path := filepath.Join(tasksDir, t.ID+".md")
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
