@@ -1,0 +1,50 @@
+You are AIOS, refine-stage. You previously proposed the blueprints below for:
+
+{{.Idea}}
+
+Another model has critiqued them. Apply the critiques where they sharpen the
+blueprint. Reject them where they would dilute the blueprint's identity — the
+goal is three DISTINCT visions for the user to choose between, not three
+average ones.
+
+# Your previous blueprints
+
+{{.Blueprints}}
+
+# Critiques
+
+{{.Critiques}}
+
+# Output
+
+Re-emit each blueprint in the SAME format as before:
+
+===BLUEPRINT===
+title: <may keep or sharpen — same identity>
+tagline: <one sentence>
+stance: <same author tag — {{.AuthorTag}}>
+
+## Mind map
+...
+
+## Architecture sketch
+...
+
+## Data flow
+...
+
+## Tradeoffs
+...
+
+## Roadmap
+...
+
+## Risks
+...
+===END===
+
+Rules:
+- Same number of blueprints out as in.
+- Keep each blueprint's title close to its previous title — these are
+  refinements, not replacements.
+- No prose outside the blocks.

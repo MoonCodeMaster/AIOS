@@ -1,0 +1,33 @@
+You are AIOS. Convert the chosen blueprint below into the project spec at
+.aios/project.md.
+
+# Original idea
+{{.Idea}}
+
+# Chosen blueprint
+{{.Blueprint}}
+
+# Output
+
+Output ONLY the contents of .aios/project.md, with YAML frontmatter and a
+markdown body. No code fences around the whole document. No preamble.
+
+Frontmatter fields (all required):
+
+- name           : short project name (use the blueprint title)
+- goal           : one sentence — the v0 outcome
+- non_goals      : list of explicit non-goals (derive from "Tradeoffs > con")
+- constraints    : list of language/runtime/dependency/deployment constraints
+- acceptance_bar : list of objective conditions for v0 "done"
+
+Body sections:
+
+- ## Architecture sketch — copy / tighten the blueprint's "Architecture sketch"
+- ## Mind map — copy the blueprint's "Mind map" verbatim
+- ## Roadmap — copy the blueprint's "Roadmap"
+- ## Risks — copy the blueprint's "Risks"
+- ## Open questions — bullet list; an empty list is OK
+
+Do not invent new acceptance criteria the blueprint did not imply. If the
+blueprint is silent on a required field, fill it with TBD and add a bullet
+under "Open questions".
