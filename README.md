@@ -81,6 +81,8 @@ The only fix that holds up is structural:
                                        main
 ```
 
+For an internal tour, see [`docs/architecture.md`](docs/architecture.md).
+
 ## Install
 
 Prereqs: `git` 2.40+, plus both AI CLIs authenticated:
@@ -295,8 +297,10 @@ Known limitations in the current release:
   graph; downstream tasks wait for the full split.
 - `--sandbox` (container isolation) remains stubbed; per-task `git worktree`
   isolation continues to be the v0.x story.
-- MCP call failures are surfaced in audit logs; surfacing them inside the
-  reviewer prompt is shipping in v0.3.1.
+- MCP call failures are surfaced both in the per-round audit
+  (`mcp-calls.json`) and inline in the reviewer prompt — the reviewer can
+  distinguish "coder ignored a constraint" from "coder couldn't reach
+  external context."
 
 ## Contributing
 
