@@ -351,6 +351,10 @@ func runMain(cmd *cobra.Command, args []string) error {
 			_ = rec.WriteRoundFile(tk.ID, i+1, "reviewer.response.raw", []byte(r.ReviewerRaw))
 			jb, _ := json.MarshalIndent(r.Checks, "", "  ")
 			_ = rec.WriteRoundFile(tk.ID, i+1, "verify.json", jb)
+			if len(r.McpCalls) > 0 {
+				mcpJSON, _ := json.MarshalIndent(r.McpCalls, "", "  ")
+				_ = rec.WriteRoundFile(tk.ID, i+1, "mcp-calls.json", mcpJSON)
+			}
 			jb2, _ := json.MarshalIndent(r.Review, "", "  ")
 			_ = rec.WriteRoundFile(tk.ID, i+1, "reviewer-response.json", jb2)
 			if r.Escalated {
