@@ -155,6 +155,44 @@ A child that re-stalls at the depth cap abandons rather than recursively splits.
 If both engines error, or the synthesizer emits fewer than 2 sub-tasks, the
 parent abandons via the audit-trail path described above.
 
+## Serve mode (issue bot)
+
+`aios serve` watches a GitHub repo for issues labeled `aios:do` and runs
+autopilot for each one. The bot opens the PR, comments back on the issue with
+the PR link, closes the issue on merge, and files an `aios:stuck` issue with
+the audit trail when autopilot abandons.
+
+```bash
+gh auth login                                # one-time
+aios serve --repo MoonCodeMaster/AIOS        # daemon
+aios serve --repo MoonCodeMaster/AIOS --once # single poll, for cron
+```
+
+Configure via `.aios/serve.toml` (all fields optional; defaults shown):
+
+```toml
+[repo]
+owner = ""    # falls back to current git remote
+name = ""
+
+[labels]
+do          = "aios:do"
+in_progress = "aios:in-progress"
+pr_open     = "aios:pr-open"
+stuck       = "aios:stuck"
+done        = "aios:done"
+
+[poll]
+interval_sec = 60
+
+[concurrency]
+max_concurrent_issues = 1   # clamped to 1 in v0.5.0
+```
+
+State persists at `.aios/serve/state.json`. A killed daemon reconciles on
+restart: `aios:in-progress` issues with no local state are released back to
+`aios:do` for retry.
+
 ## What a run actually produces
 
 ```
@@ -301,6 +339,9 @@ Known limitations in the current release:
   (`mcp-calls.json`) and inline in the reviewer prompt — the reviewer can
   distinguish "coder ignored a constraint" from "coder couldn't reach
   external context."
+- `aios serve` ships sequential-only in v0.5.0. The `[concurrency]
+  max_concurrent_issues` config knob exists but is clamped to 1 internally
+  pending per-issue `.aios/` workspace isolation.
 
 ## Contributing
 

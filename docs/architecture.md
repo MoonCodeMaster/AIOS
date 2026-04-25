@@ -91,6 +91,30 @@ When an autopilot task stalls AND `task.Depth < cfg.Budget.DecomposeDepthCap()`:
 3. Sub-tasks are stamped `<parent>.<n>`, written to `.aios/tasks/`, and spliced into the live scheduler. The parent's frontmatter is marked `decomposed`.
 4. Fallbacks: one proposal errors → use the survivor; both error → ErrAbandon; synthesizer errors → deterministic union dedupe with synthesizer-side tiebreak.
 
+### Serve mode (`internal/cli/serve.go`)
+
+`aios serve` is a poll-driven daemon that watches a GitHub repo for issues
+labeled `aios:do`. Per cycle:
+
+1. `ListLabeled("aios:do")` via the existing `gh` adapter (extended in M4).
+2. For each issue not already tracked in `.aios/serve/state.json`:
+   - Move label: `aios:do` → `aios:in-progress`. Save state.
+   - Render idea string = title + body, verbatim.
+   - Subprocess `aios autopilot "<idea>"`. Parse `autopilot-summary.md` of
+     the resulting run directory.
+   - Match outcome: `merged` → comment + close + `aios:done`; `pr-red` →
+     comment + `aios:pr-open` (issue stays open); `abandoned` → open
+     `[aios:stuck]` issue with audit trail + comment + `aios:stuck`.
+   - Clear state entry.
+
+Crash safety: `.aios/serve/state.json` records every claim. On startup,
+`Reconcile` resolves drift between GitHub labels and local state by walking
+the symmetric difference — GitHub-only orphans go back to `aios:do`,
+state-only orphans are dropped from the file.
+
+v0.5.0 ships sequential (one issue per poll). Concurrent execution requires
+per-issue `.aios/` workspace isolation, which is deferred.
+
 ## Data on disk
 
 ```
