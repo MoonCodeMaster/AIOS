@@ -18,8 +18,15 @@ type Task struct {
 	Acceptance    []string            `yaml:"acceptance"`
 	MCPAllow      []string            `yaml:"mcp_allow"`
 	MCPAllowTools map[string][]string `yaml:"mcp_allow_tools"`
-	Body          string              `yaml:"-"`
-	Path          string              `yaml:"-"`
+	// M2 — decomposition lineage. Depth=0 for original tasks; sub-tasks of a
+	// decomposed parent inherit Depth=parent.Depth+1. ParentID points at the
+	// task that decomposed into this one. DecomposedInto is populated on the
+	// PARENT task, listing the IDs of the sub-tasks it was split into.
+	Depth          int      `yaml:"depth"`
+	ParentID       string   `yaml:"parent_id"`
+	DecomposedInto []string `yaml:"decomposed_into"`
+	Body           string   `yaml:"-"`
+	Path           string   `yaml:"-"`
 }
 
 // ParseTask parses a single task markdown file.

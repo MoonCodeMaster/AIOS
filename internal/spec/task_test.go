@@ -70,3 +70,58 @@ body
 		t.Errorf("MCPAllowTools = %v, want nil/empty", tk.MCPAllowTools)
 	}
 }
+
+func TestParseTask_PreservesDecomposeFields(t *testing.T) {
+	src := `---
+id: 005.1
+kind: feature
+parent_id: "005"
+depth: 1
+status: pending
+acceptance:
+  - c1
+---
+sub-task body`
+	task, err := ParseTask(src)
+	if err != nil {
+		t.Fatalf("ParseTask: %v", err)
+	}
+	if task.ParentID != "005" {
+		t.Errorf("ParentID = %q, want %q", task.ParentID, "005")
+	}
+	if task.Depth != 1 {
+		t.Errorf("Depth = %d, want 1", task.Depth)
+	}
+}
+
+func TestParseTask_AcceptsDecomposedAndAbandonedStatus(t *testing.T) {
+	for _, status := range []string{"decomposed", "abandoned"} {
+		src := "---\nid: x\nkind: feature\nstatus: " + status + "\nacceptance:\n  - c1\n---\nbody"
+		task, err := ParseTask(src)
+		if err != nil {
+			t.Fatalf("ParseTask(%q): %v", status, err)
+		}
+		if task.Status != status {
+			t.Errorf("Status = %q, want %q", task.Status, status)
+		}
+	}
+}
+
+func TestParseTask_DecomposedIntoRoundtrips(t *testing.T) {
+	src := `---
+id: "005"
+kind: feature
+status: decomposed
+decomposed_into: ["005.1", "005.2"]
+acceptance:
+  - c1
+---
+parent body`
+	task, err := ParseTask(src)
+	if err != nil {
+		t.Fatalf("ParseTask: %v", err)
+	}
+	if len(task.DecomposedInto) != 2 || task.DecomposedInto[0] != "005.1" || task.DecomposedInto[1] != "005.2" {
+		t.Errorf("DecomposedInto = %v, want [005.1 005.2]", task.DecomposedInto)
+	}
+}
