@@ -74,6 +74,13 @@ func NewScheduler(tasks []*spec.Task) (*Scheduler, error) {
 			s.enqueueLocked(id)
 		}
 	}
+	// If we started with no work — empty task list, or every task already
+	// satisfied — signal done immediately so callers don't hang on Wait().
+	// Done() would otherwise be the only place that closes the channel, and
+	// it's never called when no worker runs.
+	if s.inflight == 0 && len(s.pending) == 0 {
+		s.doneOnce.Do(func() { close(s.done) })
+	}
 	return s, nil
 }
 

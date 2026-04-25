@@ -135,3 +135,20 @@ func equal(a, b []string) bool {
 }
 
 var _ = context.Background // keep import
+
+// TestNewScheduler_EmptyTasksClosesDoneImmediately is the regression test for
+// the "empty task list hangs the run" bug: with zero tasks, NewScheduler must
+// close its done channel before returning so callers waiting on Wait() don't
+// block indefinitely.
+func TestNewScheduler_EmptyTasksClosesDoneImmediately(t *testing.T) {
+	s, err := NewScheduler(nil)
+	if err != nil {
+		t.Fatalf("NewScheduler(nil): %v", err)
+	}
+	select {
+	case <-s.Wait():
+		// expected: done is already closed
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Wait() did not unblock for an empty task list — scheduler hangs forever")
+	}
+}
