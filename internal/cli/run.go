@@ -408,9 +408,7 @@ func runMain(cmd *cobra.Command, args []string) error {
 		// Compute the diff post-commit for the MergeRequest (HEAD..staging).
 		postDiff, _ := wm.Diff(wt, cfg.Project.StagingBranch)
 
-		tk.Status = "converged"
-		_ = updateTaskFile(tk)
-		fmt.Printf("✓ task %s converged in %d rounds\n", tk.ID, len(outcome.Rounds))
+		fmt.Printf("✓ task %s converged in %d rounds (pending merge)\n", tk.ID, len(outcome.Rounds))
 
 		// reVerify is called by MergeQueue after a successful rebase. It runs
 		// the project verify checks against the rebased branch in the main
@@ -487,6 +485,14 @@ func runMain(cmd *cobra.Command, args []string) error {
 	if err != nil && err != context.Canceled {
 		return fmt.Errorf("RunAll: %w", err)
 	}
+
+	// Persist final task status now that the merge queue has settled. This
+	// happens here, not in taskFn, because the merge queue can flip a
+	// converged task to blocked after the worker returned (rebase conflict,
+	// re-verify red, re-review rejected). Writing in taskFn would leave the
+	// on-disk frontmatter saying "converged" while the in-memory result is
+	// blocked.
+	persistFinalStatus(taskByID, rep)
 
 	// Partition blocks into real failures vs autopilot-rescue drops.
 	// Autopilot-abandoned tasks AND their cascade-blocked dependents
@@ -706,6 +712,27 @@ func buildReport(task *spec.Task, o *orchestrator.Outcome) run.Report {
 		})
 	}
 	return rpt
+}
+
+// persistFinalStatus writes each task's final status to its frontmatter file
+// after RunAll has settled. Called from runMain. Skips abandoned-by-autopilot
+// entries (their frontmatter is already "abandoned" from the rescue path).
+func persistFinalStatus(taskByID map[string]*spec.Task, rep *orchestrator.RunReport) {
+	for _, id := range rep.Converged {
+		if tk, ok := taskByID[id]; ok {
+			tk.Status = "converged"
+			_ = updateTaskFile(tk)
+		}
+	}
+	for id, br := range rep.Blocked {
+		if tk, ok := taskByID[id]; ok {
+			if br.Code == orchestrator.CodeAbandonedAutopilot {
+				continue
+			}
+			tk.Status = "blocked"
+			_ = updateTaskFile(tk)
+		}
+	}
 }
 
 func updateTaskFile(t *spec.Task) error {

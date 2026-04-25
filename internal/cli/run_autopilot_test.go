@@ -3,11 +3,15 @@ package cli
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/MoonCodeMaster/AIOS/internal/githost"
 	"github.com/MoonCodeMaster/AIOS/internal/orchestrator"
+	"github.com/MoonCodeMaster/AIOS/internal/spec"
 )
 
 func TestAutopilotRescues_OnlyStall(t *testing.T) {
@@ -173,5 +177,63 @@ func TestAutopilotTailPartitioning(t *testing.T) {
 	}
 	if _, ok := realBlocked["abandoned_dep"]; ok {
 		t.Error("abandoned_dep (cascade from abandon) must be filtered out of realBlocked")
+	}
+}
+
+func TestPersistFinalStatus_AbandonedNotOverwritten(t *testing.T) {
+	dir := t.TempDir()
+	// Build a fake task file on disk with status: abandoned (as the autopilot
+	// rescue path leaves it).
+	path := filepath.Join(dir, "001.md")
+	body := "---\nid: 001\nkind: feature\nstatus: abandoned\nacceptance:\n  - c1\n---\nbody\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tk := &spec.Task{ID: "001", Kind: "feature", Status: "abandoned", Path: path, Acceptance: []string{"c1"}}
+	taskByID := map[string]*spec.Task{"001": tk}
+
+	rep := &orchestrator.RunReport{
+		Blocked: map[orchestrator.TaskID]orchestrator.BlockReason{
+			"001": {Code: orchestrator.CodeAbandonedAutopilot, Detail: "stall"},
+		},
+	}
+	persistFinalStatus(taskByID, rep)
+
+	raw, _ := os.ReadFile(path)
+	if !strings.Contains(string(raw), "status: abandoned") {
+		t.Errorf("abandoned frontmatter must not be overwritten by persistFinalStatus; file = %q", raw)
+	}
+}
+
+func TestPersistFinalStatus_ConvergedAndBlocked(t *testing.T) {
+	dir := t.TempDir()
+	makeTask := func(id, status string) *spec.Task {
+		t.Helper()
+		path := filepath.Join(dir, id+".md")
+		body := "---\nid: " + id + "\nkind: feature\nstatus: pending\nacceptance:\n  - c1\n---\nbody\n"
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return &spec.Task{ID: id, Kind: "feature", Status: status, Path: path, Acceptance: []string{"c1"}}
+	}
+	tConv := makeTask("conv", "pending")
+	tBlock := makeTask("block", "pending")
+	taskByID := map[string]*spec.Task{"conv": tConv, "block": tBlock}
+
+	rep := &orchestrator.RunReport{
+		Converged: []orchestrator.TaskID{"conv"},
+		Blocked: map[orchestrator.TaskID]orchestrator.BlockReason{
+			"block": {Code: orchestrator.CodeRebaseConflict, Detail: "conflict"},
+		},
+	}
+	persistFinalStatus(taskByID, rep)
+
+	convRaw, _ := os.ReadFile(tConv.Path)
+	if !strings.Contains(string(convRaw), "status: converged") {
+		t.Errorf("converged task frontmatter not updated; got %q", convRaw)
+	}
+	blockRaw, _ := os.ReadFile(tBlock.Path)
+	if !strings.Contains(string(blockRaw), "status: blocked") {
+		t.Errorf("blocked task frontmatter not updated; got %q", blockRaw)
 	}
 }
