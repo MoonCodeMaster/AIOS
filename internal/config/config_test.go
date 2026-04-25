@@ -184,3 +184,24 @@ args = ["x"]
 		t.Fatal("expected error for MCP server missing binary")
 	}
 }
+
+func TestBudget_DecomposeDepthCap_DefaultIs2(t *testing.T) {
+	var b Budget
+	if got := b.DecomposeDepthCap(); got != 2 {
+		t.Errorf("DecomposeDepthCap default = %d, want 2", got)
+	}
+}
+
+func TestBudget_DecomposeDepthCap_RespectsConfig(t *testing.T) {
+	b := Budget{MaxDecomposeDepth: 1}
+	if got := b.DecomposeDepthCap(); got != 1 {
+		t.Errorf("DecomposeDepthCap with explicit 1 = %d, want 1", got)
+	}
+}
+
+func TestBudget_DecomposeDepthCap_HardCapAt3(t *testing.T) {
+	b := Budget{MaxDecomposeDepth: 99}
+	if got := b.DecomposeDepthCap(); got != 3 {
+		t.Errorf("DecomposeDepthCap with 99 = %d, want hard cap 3", got)
+	}
+}

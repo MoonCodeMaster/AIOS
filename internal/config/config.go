@@ -70,6 +70,11 @@ type Budget struct {
 	// escalation entirely (strict pre-P0 behavior). Pointer is used so
 	// "0" (disable) is distinguishable from "unset" (→ default 1).
 	MaxEscalations *int `toml:"max_escalations"`
+	// MaxDecomposeDepth is the maximum recursion depth for auto-decompose.
+	// 0 = use default (2). Hard-capped at 3 in code regardless of config —
+	// runaway decomposition is almost always a sign of a spec problem the
+	// model can't solve.
+	MaxDecomposeDepth int `toml:"max_decompose_depth"`
 }
 
 type Verify struct {
@@ -151,6 +156,20 @@ func (b Budget) Escalations() int {
 		return 1
 	}
 	return *b.MaxEscalations
+}
+
+// DecomposeDepthCap returns the effective recursion limit for auto-decompose.
+// Default 2 when unset (zero value). Hard-capped at 3 — any larger value in
+// config is silently clamped.
+func (b Budget) DecomposeDepthCap() int {
+	const hardCap = 3
+	if b.MaxDecomposeDepth == 0 {
+		return 2
+	}
+	if b.MaxDecomposeDepth > hardCap {
+		return hardCap
+	}
+	return b.MaxDecomposeDepth
 }
 
 var envRefRE = regexp.MustCompile(`\$\{env:([A-Z_][A-Z0-9_]*)\}`)
