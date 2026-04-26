@@ -11,6 +11,13 @@ import (
 	"github.com/MoonCodeMaster/AIOS/internal/specgen/prompts"
 )
 
+// Generate runs the 4-stage dual-AI pipeline. Three execution paths:
+// both drafts fail (returns the wrapped error and a partial Output);
+// one drafter survives (the survivor's draft is polished by the same
+// engine, no merge); both drafts succeed (Codex merges, Claude polishes).
+// Stage-3 and stage-4 each have their own fallback (longer draft / merged
+// version). On success Output.Final is the polished spec. On error
+// Output.Final is undefined and callers must not persist it.
 func Generate(ctx context.Context, in Input) (Output, error) {
 	if in.Claude == nil || in.Codex == nil {
 		return Output{}, errors.New("specgen: Claude and Codex engines are required")
@@ -106,6 +113,7 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 	if m3.Err != "" {
 		out.Warnings = append(out.Warnings,
 			fmt.Sprintf("Merge step failed; using longer draft as fallback. (%s)", m3.Err))
+		// On exact tie, prefer Codex — it'd have been the merger anyway.
 		if len(out.DraftCodex) >= len(out.DraftClaude) {
 			out.Merged = out.DraftCodex
 		} else {

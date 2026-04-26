@@ -178,9 +178,9 @@ contributed.
 
 Slash commands: `/show`, `/clear`, `/help`, `/ship`, `/exit`.
 
-Resume: `aios --resume` picks up the latest session, `aios --resume <session-id>`
+Resume: `aios --continue` picks up the latest session, `aios --continue <session-id>`
 picks a specific one. Sessions persist to `.aios/sessions/<id>/session.json`
-after every turn.
+after every turn. (Distinct from `aios resume <task-id>`, which unblocks a stuck task.)
 
 Failure handling: if one drafter dies, the surviving engine produces the spec
 alone and a warning is printed. If the merge step fails, the longer of the two

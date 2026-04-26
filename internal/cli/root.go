@@ -26,7 +26,7 @@ func NewRootCmd() *cobra.Command {
 			if len(args) > 0 {
 				return cmd.Help()
 			}
-			resumeID, _ := cmd.Flags().GetString("resume")
+			resumeID, _ := cmd.Flags().GetString("continue")
 			return launchRepl(cmd.Context(), resumeID)
 		},
 	}
@@ -34,7 +34,7 @@ func NewRootCmd() *cobra.Command {
 	root.PersistentFlags().String("log-level", "info", "log level: debug|info|warn|error")
 	root.PersistentFlags().Bool("dry-run", false, "print actions without calling engines or writing git")
 	root.PersistentFlags().Bool("yolo", false, "on full success, merge aios/staging into base branch")
-	root.PersistentFlags().String("resume", "", "resume an REPL session (empty = latest, or pass a session ID)")
+	root.PersistentFlags().String("continue", "", "resume an REPL session (empty = latest, or pass a session ID); not the same as the 'aios resume' subcommand")
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newResumeCmd())
 	root.AddCommand(newInitCmd())

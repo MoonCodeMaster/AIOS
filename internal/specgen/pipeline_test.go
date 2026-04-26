@@ -242,6 +242,30 @@ func TestGenerateCodexDraftFailsThenSingleDraftFlow(t *testing.T) {
 	}
 }
 
+func TestGenerateBothDraftsFailReturnsError(t *testing.T) {
+	claude := &errEngine{name: "claude", err: errors.New("claude offline")}
+	codex := &errEngine{name: "codex", err: errors.New("codex offline")}
+	out, err := Generate(context.Background(), Input{
+		UserRequest: "x", Claude: claude, Codex: codex,
+	})
+	if err == nil {
+		t.Fatalf("expected error when both drafters fail")
+	}
+	if !strings.Contains(err.Error(), "both drafters failed") {
+		t.Fatalf("error message = %q, want it to mention both drafters", err.Error())
+	}
+	if out.Final != "" {
+		t.Fatalf("Final should be empty when both drafters fail; got %q", out.Final)
+	}
+	stagesByName := map[string]StageMetric{}
+	for _, s := range out.Stages {
+		stagesByName[s.Name] = s
+	}
+	if !stagesByName["merge"].Skipped || !stagesByName["polish"].Skipped {
+		t.Fatalf("merge and polish stages should be Skipped when both drafts fail; got %+v", out.Stages)
+	}
+}
+
 // scriptedErrEngine returns scripted responses where each entry is either
 // a successful text response or an error.
 type scriptedErrEngine struct {
