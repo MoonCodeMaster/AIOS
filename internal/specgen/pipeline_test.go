@@ -241,3 +241,55 @@ func TestGenerateCodexDraftFailsThenSingleDraftFlow(t *testing.T) {
 		t.Fatalf("expected warning about Codex failure; got %v", out.Warnings)
 	}
 }
+
+// scriptedErrEngine returns scripted responses where each entry is either
+// a successful text response or an error.
+type scriptedErrEngine struct {
+	name      string
+	responses []scriptedErrResponse
+	idx       int
+	mu        sync.Mutex
+}
+
+type scriptedErrResponse struct {
+	text string
+	err  error
+}
+
+func (e *scriptedErrEngine) Name() string { return e.name }
+func (e *scriptedErrEngine) Invoke(_ context.Context, _ engine.InvokeRequest) (*engine.InvokeResponse, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.idx >= len(e.responses) {
+		return nil, errors.New("scriptedErrEngine: exhausted")
+	}
+	r := e.responses[e.idx]
+	e.idx++
+	if r.err != nil {
+		return nil, r.err
+	}
+	return &engine.InvokeResponse{Text: r.text}, nil
+}
+
+func TestGenerateSingleDraftPolishAlsoFailsFallsBackToRawDraft(t *testing.T) {
+	claude := &errEngine{name: "claude", err: errors.New("claude offline")}
+	codex := &scriptedErrEngine{name: "codex", responses: []scriptedErrResponse{
+		{text: "RAW_DRAFT_B"},
+		{err: errors.New("codex polish failed")},
+	}}
+	out, err := Generate(context.Background(), Input{
+		UserRequest: "x", Claude: claude, Codex: codex,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if out.Final != "RAW_DRAFT_B" {
+		t.Fatalf("Final = %q, want RAW_DRAFT_B (raw draft fallback)", out.Final)
+	}
+	if len(out.Warnings) < 2 {
+		t.Fatalf("expected at least 2 warnings (draft + polish); got %v", out.Warnings)
+	}
+	if !strings.Contains(out.Warnings[1], "Polish") {
+		t.Fatalf("second warning should mention Polish; got %q", out.Warnings[1])
+	}
+}
