@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/MoonCodeMaster/AIOS/internal/config"
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
@@ -22,12 +23,30 @@ func NewRootCmd() *cobra.Command {
 		Version: Version,
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Bare `aios` (no subcommand, no positional args) launches the REPL.
-			if len(args) > 0 {
-				return cmd.Help()
-			}
+			ship, _ := cmd.Flags().GetBool("ship")
+			print, _ := cmd.Flags().GetBool("print")
 			resumeID, _ := cmd.Flags().GetString("continue")
-			return launchRepl(cmd.Context(), resumeID)
+
+			// Bare aios with no args → REPL.
+			if len(args) == 0 {
+				if ship || print {
+					return fmt.Errorf("--ship and -p require a prompt argument")
+				}
+				return launchRepl(cmd.Context(), resumeID)
+			}
+			// aios "prompt" with positional → one-shot.
+			prompt := strings.Join(args, " ")
+			if ship && print {
+				return fmt.Errorf("--ship and -p are mutually exclusive")
+			}
+			if resumeID != "" {
+				return fmt.Errorf("--continue is REPL-only; do not combine with a prompt")
+			}
+			// Tasks 6 and 7 wire --ship and -p. Task 5 only does the no-flag path.
+			if ship || print {
+				return fmt.Errorf("not implemented yet (Task 6 / Task 7)")
+			}
+			return launchOneShot(cmd.Context(), prompt)
 		},
 	}
 	root.PersistentFlags().String("config", ".aios/config.toml", "path to AIOS config")
@@ -35,6 +54,8 @@ func NewRootCmd() *cobra.Command {
 	root.PersistentFlags().Bool("dry-run", false, "print actions without calling engines or writing git")
 	root.PersistentFlags().Bool("yolo", false, "on full success, merge aios/staging into base branch")
 	root.PersistentFlags().String("continue", "", "resume an REPL session (empty = latest, or pass a session ID); not the same as the 'aios resume' subcommand")
+	root.Flags().Bool("ship", false, "run the full ship pipeline: specgen + decompose + execute + PR + merge")
+	root.Flags().BoolP("print", "p", false, "print the generated spec to stdout (no project.md write, no shipping)")
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newResumeCmd())
 	root.AddCommand(newInitCmd())
@@ -50,6 +71,25 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newReviewCmd())
 	root.AddCommand(newMCPCmd())
 	return root
+}
+
+// launchOneShot boots real engines for `aios "prompt"`, runs runOneShot.
+func launchOneShot(ctx context.Context, prompt string) error {
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getwd: %w", err)
+	}
+	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
+	if err != nil {
+		return fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
+	}
+	return runOneShot(ctx, OneShotInput{
+		Wd:     wd,
+		Prompt: prompt,
+		Claude: &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},
+		Codex:  &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
+		Out:    os.Stdout,
+	})
 }
 
 // launchRepl boots a Repl with real engines and stdio, then runs it.
