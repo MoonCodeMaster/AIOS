@@ -26,25 +26,19 @@ func NewRootCmd() *cobra.Command {
 			ship, _ := cmd.Flags().GetBool("ship")
 			print, _ := cmd.Flags().GetBool("print")
 			resumeID, _ := cmd.Flags().GetString("continue")
-
-			// Bare aios with no args → REPL.
+			if err := validateRootFlags(args, ship, print, resumeID); err != nil {
+				return err
+			}
 			if len(args) == 0 {
-				if ship || print {
-					return fmt.Errorf("--ship and -p require a prompt argument")
-				}
 				return launchRepl(cmd.Context(), resumeID)
 			}
-			// aios "prompt" with positional → one-shot.
 			prompt := strings.Join(args, " ")
-			if ship && print {
-				return fmt.Errorf("--ship and -p are mutually exclusive")
+			if ship {
+				_, err := launchShip(cmd.Context(), prompt)
+				return err
 			}
-			if resumeID != "" {
-				return fmt.Errorf("--continue is REPL-only; do not combine with a prompt")
-			}
-			// Tasks 6 and 7 wire --ship and -p. Task 5 only does the no-flag path.
-			if ship || print {
-				return fmt.Errorf("not implemented yet (Task 6 / Task 7)")
+			if print {
+				return fmt.Errorf("not implemented yet (Task 7)")
 			}
 			return launchOneShot(cmd.Context(), prompt)
 		},
@@ -71,6 +65,46 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newReviewCmd())
 	root.AddCommand(newMCPCmd())
 	return root
+}
+
+// validateRootFlags returns an error if the combination of args + flags
+// is illegal for the bare `aios` invocation. Extracted from RunE for
+// unit-testability.
+func validateRootFlags(args []string, ship, print bool, resumeID string) error {
+	if len(args) == 0 {
+		if ship || print {
+			return fmt.Errorf("--ship and -p require a prompt argument")
+		}
+		return nil
+	}
+	if ship && print {
+		return fmt.Errorf("--ship and -p are mutually exclusive")
+	}
+	if resumeID != "" {
+		return fmt.Errorf("--continue is REPL-only; do not combine with a prompt")
+	}
+	return nil
+}
+
+// launchShip boots real engines for `aios --ship "prompt"`, runs ShipPrompt,
+// and returns the structured result.
+func launchShip(ctx context.Context, prompt string) (ShipResult, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ShipResult{}, fmt.Errorf("getwd: %w", err)
+	}
+	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
+	if err != nil {
+		return ShipResult{}, fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
+	}
+	fmt.Fprintf(os.Stdout, "shipping %q…\n", prompt)
+	return ShipPrompt(ctx, ShipPromptInput{
+		Wd:      wd,
+		Prompt:  prompt,
+		Claude:  &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},
+		Codex:   &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
+		OnStage: func(name string) { fmt.Fprintf(os.Stdout, "  · %s …\n", name) },
+	})
 }
 
 // launchOneShot boots real engines for `aios "prompt"`, runs runOneShot.
