@@ -38,6 +38,33 @@ func TestOneShotSpecWritesProjectMd(t *testing.T) {
 	}
 }
 
+func TestPrintModeWritesToStdoutOnlyNoFile(t *testing.T) {
+	wd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(wd, ".aios"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	claude := &engine.FakeEngine{Name_: "claude", Script: []engine.InvokeResponse{
+		{Text: "DRAFT_A"}, {Text: "POLISHED_PRINT"},
+	}}
+	codex := &engine.FakeEngine{Name_: "codex", Script: []engine.InvokeResponse{
+		{Text: "DRAFT_B"}, {Text: "MERGED"},
+	}}
+	stdout := &bytes.Buffer{}
+	err := runPrintMode(context.Background(), PrintModeInput{
+		Wd: wd, Prompt: "x", Claude: claude, Codex: codex, Out: stdout,
+	})
+	if err != nil {
+		t.Fatalf("runPrintMode: %v", err)
+	}
+	if got := stdout.String(); got != "POLISHED_PRINT" && got != "POLISHED_PRINT\n" {
+		t.Fatalf("stdout = %q, want exactly POLISHED_PRINT (with optional trailing newline)", got)
+	}
+	// project.md must NOT exist.
+	if _, err := os.Stat(filepath.Join(wd, ".aios", "project.md")); !os.IsNotExist(err) {
+		t.Fatalf("project.md should not exist in print mode; stat err = %v", err)
+	}
+}
+
 func TestValidateRootFlags(t *testing.T) {
 	cases := []struct {
 		name string

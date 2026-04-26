@@ -38,7 +38,7 @@ func NewRootCmd() *cobra.Command {
 				return err
 			}
 			if print {
-				return fmt.Errorf("not implemented yet (Task 7)")
+				return launchPrintMode(cmd.Context(), prompt)
 			}
 			return launchOneShot(cmd.Context(), prompt)
 		},
@@ -118,6 +118,25 @@ func launchOneShot(ctx context.Context, prompt string) error {
 		return fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
 	}
 	return runOneShot(ctx, OneShotInput{
+		Wd:     wd,
+		Prompt: prompt,
+		Claude: &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},
+		Codex:  &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
+		Out:    os.Stdout,
+	})
+}
+
+// launchPrintMode boots real engines for `aios -p "prompt"`, runs runPrintMode.
+func launchPrintMode(ctx context.Context, prompt string) error {
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("getwd: %w", err)
+	}
+	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
+	if err != nil {
+		return fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
+	}
+	return runPrintMode(ctx, PrintModeInput{
 		Wd:     wd,
 		Prompt: prompt,
 		Claude: &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},

@@ -64,3 +64,35 @@ func runOneShot(ctx context.Context, in OneShotInput) error {
 	fmt.Fprintf(in.Out, "Spec written to %s. Run `aios --ship %q` to implement, or open the REPL with `aios` to refine.\n", specPath, in.Prompt)
 	return nil
 }
+
+// PrintModeInput bundles the inputs for `aios -p "prompt"`.
+type PrintModeInput struct {
+	Wd     string
+	Prompt string
+	Claude engine.Engine
+	Codex  engine.Engine
+	Out    io.Writer
+}
+
+// runPrintMode runs specgen and writes ONLY the polished spec to Out.
+// No project.md, no progress noise, no run dir summary on stdout.
+// Audit artifacts under .aios/runs/<id>/specgen/ still get written
+// (the Recorder is bound) so debugging is preserved.
+func runPrintMode(ctx context.Context, in PrintModeInput) error {
+	runID := time.Now().UTC().Format("2006-01-02T15-04-05")
+	rec, err := run.Open(filepath.Join(in.Wd, ".aios", "runs"), runID)
+	if err != nil {
+		return fmt.Errorf("open run dir: %w", err)
+	}
+	out, err := specgen.Generate(ctx, specgen.Input{
+		UserRequest: in.Prompt,
+		Claude:      in.Claude,
+		Codex:       in.Codex,
+		Recorder:    rec,
+	})
+	if err != nil {
+		return fmt.Errorf("specgen: %w", err)
+	}
+	_, err = fmt.Fprint(in.Out, out.Final)
+	return err
+}
