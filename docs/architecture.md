@@ -195,3 +195,26 @@ per-issue `.aios/` workspace isolation, which is deferred.
 AIOS is a single Go process per run. The Claude and Codex CLIs are separate child processes invoked synchronously per coder/reviewer call. MCP servers are long-lived child processes managed by `internal/mcp.Manager` and shut down cleanly on run completion.
 
 GitHub interaction goes through the `gh` CLI as another child process — no native Go GitHub client.
+
+## Interactive entry point and specgen pipeline
+
+`aios` (no subcommand) launches `internal/cli/repl.Repl`, an interactive turn
+loop. Each user message is dispatched to `internal/specgen.Generate`, which
+runs four stages with stages 1 and 2 in parallel:
+
+```
+        ┌─ Claude draft A ──┐
+user ──>│                   ├─> Codex merge ──> Claude polish ──> .aios/project.md
+        └─ Codex draft B  ──┘
+```
+
+Intermediate drafts and per-stage timing/token metrics are persisted under
+`.aios/runs/<run-id>/specgen/`. Session state (turn history, current spec path)
+is persisted under `.aios/sessions/<id>/session.json` after every turn so a
+crashed REPL is resumable via `aios --resume`. The `/ship` slash command reuses
+the existing autopilot path: decompose the spec on disk into task files, then
+`aios run --autopilot --merge`.
+
+Partial-failure fallbacks (one drafter dead, merge fails, polish fails) are
+handled inside `Generate` and surfaced to the REPL via `Output.Warnings`. No
+automatic retries.

@@ -128,6 +128,7 @@ git merge aios/staging             # you're the last human in the loop
 
 | Command | What it does |
 |---|---|
+| `aios` | Interactive entry point — each turn produces a unified spec via the dual-AI pipeline; `/ship` hands off to autopilot. |
 | `aios init` | Bootstrap `.aios/config.toml` for the current repo. |
 | `aios doctor` | One-shot preflight — engines, auth, git, config, smoke-test. |
 | `aios new <idea>` | Brainstorm → spec → task list. Confirms before commit. |
@@ -141,6 +142,54 @@ git merge aios/staging             # you're the last human in the loop
 | `aios lessons` | Mine `.aios/runs/` for recurring reviewer-issue patterns. |
 | `aios mcp scaffold <preset>` | Append a ready MCP server block (github / fs-readonly / playwright). |
 | `aios resume`, `aios status` | Standard run-management helpers. |
+
+## Interactive mode
+
+Run `aios` with no subcommand for an interactive session. Same shape as `claude`
+or `codex`.
+
+```
+$ aios
+aios — type a requirement, blank line to submit. /help for commands.
+> build a CLI for syncing notebooks across machines
+>
+  · draft-claude …
+  · draft-codex …
+  · merge …
+  · polish …
+Spec updated (84 lines). /show to view, /ship to implement, or refine with another message.
+> tighten the section on conflict resolution
+>
+  · ...
+> /ship
+shipping spec to autopilot…
+```
+
+Each turn runs a 4-stage dual-AI pipeline:
+
+1. Claude drafts spec A.
+2. Codex drafts spec B (in parallel with stage 1).
+3. Codex merges A and B into one spec, with initial polish.
+4. Claude does a secondary refinement on the merged spec.
+
+The final spec is written to `.aios/project.md`. The four intermediate drafts
+land under `.aios/runs/<run-id>/specgen/` so you can see what each stage
+contributed.
+
+Slash commands: `/show`, `/clear`, `/help`, `/ship`, `/exit`.
+
+Resume: `aios --resume` picks up the latest session, `aios --resume <session-id>`
+picks a specific one. Sessions persist to `.aios/sessions/<id>/session.json`
+after every turn.
+
+Failure handling: if one drafter dies, the surviving engine produces the spec
+alone and a warning is printed. If the merge step fails, the longer of the two
+drafts becomes the merged version. If polish fails, the merged version is the
+final. With either Claude or Codex missing from PATH the REPL refuses to launch
+— run `aios doctor` to diagnose.
+
+`aios new` and `aios architect` remain for users who want the legacy single-shot
+or three-blueprint flows.
 
 ## Autopilot mode (no human input)
 
