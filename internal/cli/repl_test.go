@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 )
@@ -152,5 +153,48 @@ func TestReplShipCallsAutopilotHook(t *testing.T) {
 	}
 	if !called {
 		t.Fatalf("ShipFn was not called")
+	}
+}
+
+func TestReplResumeRestoresTurns(t *testing.T) {
+	wd := t.TempDir()
+	sessionID := "2026-04-26T10-00-00"
+	sessionDir := filepath.Join(wd, ".aios", "sessions", sessionID)
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prior := &Session{
+		ID:         sessionID,
+		Created:    time.Now().UTC(),
+		SessionDir: sessionDir,
+		SpecPath:   filepath.Join(wd, ".aios", "project.md"),
+		Turns: []SessionTurn{
+			{Timestamp: time.Now().UTC(), UserMessage: "first", SpecAfter: "OLD_SPEC", RunID: "r1"},
+		},
+	}
+	if err := prior.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prior.SpecPath, []byte("OLD_SPEC"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout := &bytes.Buffer{}
+	r := &Repl{
+		Wd:       wd,
+		In:       strings.NewReader("/exit\n"),
+		Out:      stdout,
+		Claude:   &engine.FakeEngine{Name_: "claude"},
+		Codex:    &engine.FakeEngine{Name_: "codex"},
+		ResumeID: "",
+	}
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if r.session == nil || r.session.ID != sessionID {
+		t.Fatalf("session not restored; got %+v", r.session)
+	}
+	if len(r.session.Turns) != 1 || r.session.Turns[0].UserMessage != "first" {
+		t.Fatalf("turn history not restored; got %+v", r.session.Turns)
 	}
 }

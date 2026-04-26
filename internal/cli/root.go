@@ -26,7 +26,8 @@ func NewRootCmd() *cobra.Command {
 			if len(args) > 0 {
 				return cmd.Help()
 			}
-			return launchRepl(cmd.Context())
+			resumeID, _ := cmd.Flags().GetString("resume")
+			return launchRepl(cmd.Context(), resumeID)
 		},
 	}
 	root.PersistentFlags().String("config", ".aios/config.toml", "path to AIOS config")
@@ -52,7 +53,7 @@ func NewRootCmd() *cobra.Command {
 }
 
 // launchRepl boots a Repl with real engines and stdio, then runs it.
-func launchRepl(ctx context.Context) error {
+func launchRepl(ctx context.Context, resumeID string) error {
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getwd: %w", err)
@@ -69,6 +70,7 @@ func launchRepl(ctx context.Context) error {
 		Codex:        &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
 		ClaudeBinary: cfg.Engines.Claude.Binary,
 		CodexBinary:  cfg.Engines.Codex.Binary,
+		ResumeID:     resumeID,
 	}
 	return r.Run(ctx)
 }

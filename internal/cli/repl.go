@@ -34,6 +34,8 @@ type Repl struct {
 
 	ShipFn func(ctx context.Context, wd string) error // injectable for tests; defaults to runAutopilotShip
 
+	ResumeID string // empty = use LatestSession; specific ID = LoadSession(<id>)
+
 	session *Session
 	outMu   sync.Mutex // guards Out against concurrent stage callbacks
 }
@@ -97,11 +99,32 @@ func (r *Repl) bootSession() error {
 	if r.session != nil {
 		return nil
 	}
+	sessionsDir := filepath.Join(r.Wd, ".aios", "sessions")
+	switch {
+	case r.ResumeID != "":
+		s, err := LoadSession(filepath.Join(sessionsDir, r.ResumeID))
+		if err != nil {
+			return fmt.Errorf("resume %s: %w", r.ResumeID, err)
+		}
+		r.session = s
+		fmt.Fprintf(r.Out, "resumed session %s (%d prior turns)\n", s.ID, len(s.Turns))
+		return nil
+	default:
+		// Auto-resume the latest session if any exist.
+		if _, err := os.Stat(sessionsDir); err == nil {
+			if s, err := LatestSession(sessionsDir); err == nil {
+				r.session = s
+				fmt.Fprintf(r.Out, "resumed session %s (%d prior turns)\n", s.ID, len(s.Turns))
+				return nil
+			}
+		}
+	}
+	// Fresh session.
 	id := NewSessionID()
 	r.session = &Session{
 		ID:         id,
 		Created:    time.Now().UTC(),
-		SessionDir: filepath.Join(r.Wd, ".aios", "sessions", id),
+		SessionDir: filepath.Join(sessionsDir, id),
 		SpecPath:   filepath.Join(r.Wd, ".aios", "project.md"),
 	}
 	return r.session.Save()
