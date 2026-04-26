@@ -14,8 +14,10 @@ type Input struct {
 	Claude         engine.Engine // required
 	Codex          engine.Engine // required
 	Recorder       *run.Recorder // optional; nil = do not persist intermediates
-	OnStageStart   func(name string)
-	OnStageEnd     func(name string, err error)
+	// OnStageStart and OnStageEnd may be invoked concurrently for the
+	// draft-claude and draft-codex stages, which run in parallel goroutines.
+	OnStageStart func(name string)
+	OnStageEnd   func(name string, err error)
 }
 
 // Turn is one prior REPL exchange in the same session.
