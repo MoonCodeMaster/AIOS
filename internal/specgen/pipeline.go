@@ -30,21 +30,32 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 		return out, fmt.Errorf("render draft prompt: %w", err)
 	}
 
-	// Stage 1: Claude draft
-	claudeText, m1 := runStage(ctx, "draft-claude", "claude", in.Claude, draftPrompt, in.OnStageStart, in.OnStageEnd)
-	out.Stages = append(out.Stages, m1)
-	if m1.Err != "" {
-		return out, fmt.Errorf("stage draft-claude: %s", m1.Err)
+	// Stages 1 and 2 in parallel.
+	type draftResult struct {
+		text   string
+		metric StageMetric
 	}
-	out.DraftClaude = claudeText
-
-	// Stage 2: Codex draft
-	codexText, m2 := runStage(ctx, "draft-codex", "codex", in.Codex, draftPrompt, in.OnStageStart, in.OnStageEnd)
-	out.Stages = append(out.Stages, m2)
-	if m2.Err != "" {
-		return out, fmt.Errorf("stage draft-codex: %s", m2.Err)
+	claudeCh := make(chan draftResult, 1)
+	codexCh := make(chan draftResult, 1)
+	go func() {
+		text, m := runStage(ctx, "draft-claude", "claude", in.Claude, draftPrompt, in.OnStageStart, in.OnStageEnd)
+		claudeCh <- draftResult{text, m}
+	}()
+	go func() {
+		text, m := runStage(ctx, "draft-codex", "codex", in.Codex, draftPrompt, in.OnStageStart, in.OnStageEnd)
+		codexCh <- draftResult{text, m}
+	}()
+	c := <-claudeCh
+	x := <-codexCh
+	out.Stages = append(out.Stages, c.metric, x.metric)
+	if c.metric.Err != "" {
+		return out, fmt.Errorf("stage draft-claude: %s", c.metric.Err)
 	}
-	out.DraftCodex = codexText
+	if x.metric.Err != "" {
+		return out, fmt.Errorf("stage draft-codex: %s", x.metric.Err)
+	}
+	out.DraftClaude = c.text
+	out.DraftCodex = x.text
 
 	// Stage 3: Codex merge
 	mergePrompt, err := prompts.Render("merge.tmpl", map[string]string{

@@ -2,8 +2,11 @@ package specgen
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 )
@@ -54,5 +57,63 @@ func TestGenerateHappyPath(t *testing.T) {
 	stage4Prompt := claude.Received[1].Prompt
 	if !strings.Contains(stage4Prompt, "MERGED") {
 		t.Fatalf("polish stage prompt did not include merged body; got: %s", stage4Prompt)
+	}
+}
+
+// multiTimingEngine returns scripted responses in order; each Invoke call
+// records its start time and shares the same delay.
+type multiTimingEngine struct {
+	name      string
+	delay     time.Duration
+	responses []string
+	startedAt []int64
+	mu        sync.Mutex
+	idx       int
+}
+
+func (e *multiTimingEngine) Name() string { return e.name }
+func (e *multiTimingEngine) Invoke(ctx context.Context, _ engine.InvokeRequest) (*engine.InvokeResponse, error) {
+	e.mu.Lock()
+	if e.idx >= len(e.responses) {
+		e.mu.Unlock()
+		return nil, errors.New("multiTimingEngine exhausted")
+	}
+	now := time.Now().UnixNano()
+	e.startedAt = append(e.startedAt, now)
+	r := e.responses[e.idx]
+	e.idx++
+	e.mu.Unlock()
+	time.Sleep(e.delay)
+	return &engine.InvokeResponse{Text: r}, nil
+}
+
+func TestGenerateDraftsConcurrent(t *testing.T) {
+	claude := &multiTimingEngine{name: "claude", delay: 80 * time.Millisecond, responses: []string{"DRAFT_A", "POLISHED"}}
+	codex := &multiTimingEngine{name: "codex", delay: 80 * time.Millisecond, responses: []string{"DRAFT_B", "MERGED"}}
+
+	start := time.Now()
+	out, err := Generate(context.Background(), Input{UserRequest: "x", Claude: claude, Codex: codex})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if out.Final != "POLISHED" {
+		t.Fatalf("Final = %q", out.Final)
+	}
+	// Sequential lower bound: 4 * 80ms = 320ms. With stages 1+2 parallel,
+	// expect ~3 * 80ms = 240ms. Fail only above 350ms (proves sequential).
+	if elapsed > 350*time.Millisecond {
+		t.Fatalf("Generate took %v — stages 1 and 2 ran sequentially (expected parallel)", elapsed)
+	}
+	// Both first-call start times should be within 30ms of each other.
+	if len(claude.startedAt) < 1 || len(codex.startedAt) < 1 {
+		t.Fatalf("missing start times")
+	}
+	skew := claude.startedAt[0] - codex.startedAt[0]
+	if skew < 0 {
+		skew = -skew
+	}
+	if skew > int64(30*time.Millisecond) {
+		t.Fatalf("draft start skew = %v, want < 30ms", time.Duration(skew))
 	}
 }
