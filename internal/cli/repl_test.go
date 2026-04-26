@@ -123,3 +123,34 @@ func TestReplRefusesWhenCLIMissing(t *testing.T) {
 		t.Fatalf("error should mention missing claude; got: %v", err)
 	}
 }
+
+func TestReplShipCallsAutopilotHook(t *testing.T) {
+	wd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(wd, ".aios"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wd, ".aios", "project.md"), []byte("SPEC"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	r := &Repl{
+		Wd:     wd,
+		In:     strings.NewReader("/ship\n\n"),
+		Out:    &bytes.Buffer{},
+		Claude: &engine.FakeEngine{Name_: "claude"},
+		Codex:  &engine.FakeEngine{Name_: "codex"},
+		ShipFn: func(_ context.Context, w string) error {
+			if w == "" {
+				t.Fatalf("ShipFn called with empty wd")
+			}
+			called = true
+			return nil
+		},
+	}
+	if err := r.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !called {
+		t.Fatalf("ShipFn was not called")
+	}
+}
