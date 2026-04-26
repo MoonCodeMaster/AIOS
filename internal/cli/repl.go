@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
@@ -25,6 +26,7 @@ type Repl struct {
 	NoColor bool
 
 	session *Session
+	outMu   sync.Mutex // guards Out against concurrent stage callbacks
 }
 
 // Run executes the REPL turn loop until /exit, EOF, or /ship.
@@ -98,14 +100,18 @@ func (r *Repl) runTurn(ctx context.Context, msg string) error {
 		prior[i] = specgen.Turn{UserMessage: t.UserMessage, FinalSpec: t.SpecAfter}
 	}
 	in := specgen.Input{
-		UserRequest:  msg,
-		PriorTurns:   prior,
-		CurrentSpec:  currentSpec,
-		Claude:       r.Claude,
-		Codex:        r.Codex,
-		Recorder:     rec,
-		OnStageStart: func(name string) { fmt.Fprintf(r.Out, "  · %s …\n", name) },
-		OnStageEnd:   func(_ string, _ error) {},
+		UserRequest: msg,
+		PriorTurns:  prior,
+		CurrentSpec: currentSpec,
+		Claude:      r.Claude,
+		Codex:       r.Codex,
+		Recorder:    rec,
+		OnStageStart: func(name string) {
+			r.outMu.Lock()
+			fmt.Fprintf(r.Out, "  · %s …\n", name)
+			r.outMu.Unlock()
+		},
+		OnStageEnd: func(_ string, _ error) {},
 	}
 	out, err := specgen.Generate(ctx, in)
 	if err != nil {
