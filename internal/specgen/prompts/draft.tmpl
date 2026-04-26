@@ -1,0 +1,29 @@
+You are generating a complete spec/plan for a software requirement.
+Be opinionated, structured, and concrete. Use Markdown headings.
+
+Cover at minimum: Goal, Non-goals, User-facing surface, Architecture,
+Files to create or modify, Testing strategy, Open questions.
+
+User requirement:
+---
+{{.UserRequest}}
+---
+{{if .CurrentSpec}}
+
+The current spec (refining it, not starting fresh):
+---
+{{.CurrentSpec}}
+---
+{{end}}{{if .PriorTurns}}
+
+Prior conversation in this session:
+{{range .PriorTurns}}- User said: {{.UserMessage}}
+{{end}}{{end}}{{if .ProjectContext}}
+
+Repo context:
+---
+{{.ProjectContext}}
+---
+{{end}}
+
+Output ONLY the spec. No preamble, no commentary.
