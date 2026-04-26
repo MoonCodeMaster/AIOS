@@ -107,10 +107,18 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 	mergedText, m3 := runStage(ctx, "merge", "codex", in.Codex, mergePrompt, in.OnStageStart, in.OnStageEnd)
 	out.Stages = append(out.Stages, m3)
 	if m3.Err != "" {
-		// Stage 3 fallback handled in Task 7.
-		return out, fmt.Errorf("stage merge: %s", m3.Err)
+		out.Warnings = append(out.Warnings,
+			fmt.Sprintf("Merge step failed; using longer draft as fallback. (%s)", m3.Err))
+		if len(out.DraftCodex) >= len(out.DraftClaude) {
+			out.Merged = out.DraftCodex
+		} else {
+			out.Merged = out.DraftClaude
+		}
+		// Mark stage as fallback for the audit trail.
+		out.Stages[len(out.Stages)-1].Fallback = "longer-draft"
+	} else {
+		out.Merged = mergedText
 	}
-	out.Merged = mergedText
 
 	polishPrompt, err := prompts.Render("polish.tmpl", map[string]string{"Merged": out.Merged})
 	if err != nil {

@@ -293,3 +293,31 @@ func TestGenerateSingleDraftPolishAlsoFailsFallsBackToRawDraft(t *testing.T) {
 		t.Fatalf("second warning should mention Polish; got %q", out.Warnings[1])
 	}
 }
+
+func TestGenerateMergeFailsFallsBackToLongerDraft(t *testing.T) {
+	claude := &scriptedErrEngine{name: "claude", responses: []scriptedErrResponse{
+		{text: "DRAFT_A_short"},
+		{text: "POLISHED"}, // stage 4 polishes whichever fallback we picked
+	}}
+	codex := &scriptedErrEngine{name: "codex", responses: []scriptedErrResponse{
+		{text: "DRAFT_B_this_one_is_clearly_longer_than_A"}, // stage 2
+		{err: errors.New("codex merge failed")},             // stage 3
+	}}
+
+	out, err := Generate(context.Background(), Input{
+		UserRequest: "x", Claude: claude, Codex: codex,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if out.Final != "POLISHED" {
+		t.Fatalf("Final = %q", out.Final)
+	}
+	// Merged should be the longer draft (Codex's).
+	if out.Merged != "DRAFT_B_this_one_is_clearly_longer_than_A" {
+		t.Fatalf("Merged = %q, want longer draft as fallback", out.Merged)
+	}
+	if len(out.Warnings) == 0 || !strings.Contains(out.Warnings[0], "Merge") {
+		t.Fatalf("expected merge-fallback warning; got %v", out.Warnings)
+	}
+}
