@@ -2,6 +2,7 @@ package specgen
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -83,6 +84,16 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 		return out, fmt.Errorf("stage polish: %s", m4.Err)
 	}
 	out.Final = polishedText
+
+	if in.Recorder != nil {
+		_ = in.Recorder.WriteFile("specgen/draft-claude.md", []byte(out.DraftClaude))
+		_ = in.Recorder.WriteFile("specgen/draft-codex.md", []byte(out.DraftCodex))
+		_ = in.Recorder.WriteFile("specgen/merged.md", []byte(out.Merged))
+		_ = in.Recorder.WriteFile("specgen/final.md", []byte(out.Final))
+		if data, err := json.MarshalIndent(out.Stages, "", "  "); err == nil {
+			_ = in.Recorder.WriteFile("specgen/stages.json", data)
+		}
+	}
 
 	return out, nil
 }

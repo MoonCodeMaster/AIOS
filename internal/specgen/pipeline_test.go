@@ -2,13 +2,17 @@ package specgen
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/run"
 )
 
 func TestGenerateHappyPath(t *testing.T) {
@@ -115,5 +119,56 @@ func TestGenerateDraftsConcurrent(t *testing.T) {
 	}
 	if skew > int64(30*time.Millisecond) {
 		t.Fatalf("draft start skew = %v, want < 30ms", time.Duration(skew))
+	}
+}
+
+func TestGeneratePersistsIntermediates(t *testing.T) {
+	dir := t.TempDir()
+	rec, err := run.Open(dir, "test-run")
+	if err != nil {
+		t.Fatalf("run.Open: %v", err)
+	}
+	claude := &engine.FakeEngine{Name_: "claude", Script: []engine.InvokeResponse{
+		{Text: "DRAFT_A"}, {Text: "POLISHED"},
+	}}
+	codex := &engine.FakeEngine{Name_: "codex", Script: []engine.InvokeResponse{
+		{Text: "DRAFT_B"}, {Text: "MERGED"},
+	}}
+
+	_, err = Generate(context.Background(), Input{
+		UserRequest: "x", Claude: claude, Codex: codex, Recorder: rec,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	want := map[string]string{
+		"specgen/draft-claude.md": "DRAFT_A",
+		"specgen/draft-codex.md":  "DRAFT_B",
+		"specgen/merged.md":       "MERGED",
+		"specgen/final.md":        "POLISHED",
+	}
+	for rel, body := range want {
+		p := filepath.Join(dir, "test-run", rel)
+		got, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if string(got) != body {
+			t.Fatalf("%s = %q, want %q", rel, got, body)
+		}
+	}
+
+	stagesPath := filepath.Join(dir, "test-run", "specgen", "stages.json")
+	raw, err := os.ReadFile(stagesPath)
+	if err != nil {
+		t.Fatalf("read stages.json: %v", err)
+	}
+	var stages []StageMetric
+	if err := json.Unmarshal(raw, &stages); err != nil {
+		t.Fatalf("unmarshal stages.json: %v", err)
+	}
+	if len(stages) != 4 {
+		t.Fatalf("stages.json had %d entries, want 4", len(stages))
 	}
 }
