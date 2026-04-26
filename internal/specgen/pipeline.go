@@ -17,10 +17,7 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 	}
 	out := Output{}
 
-	priorForTmpl := make([]map[string]string, len(in.PriorTurns))
-	for i, t := range in.PriorTurns {
-		priorForTmpl[i] = map[string]string{"UserMessage": t.UserMessage}
-	}
+	priorForTmpl := buildPriorContext(in.PriorTurns)
 	draftPrompt, err := prompts.Render("draft.tmpl", map[string]any{
 		"UserRequest":    in.UserRequest,
 		"CurrentSpec":    in.CurrentSpec,
@@ -175,4 +172,36 @@ func runStage(ctx context.Context, name, engineName string, eng engine.Engine, p
 	}
 	m.TokensUsed = resp.UsageTokens
 	return resp.Text, m
+}
+
+// priorContextThreshold is the byte cap for prior-turn material before
+// summarization kicks in. Conservative starting value; tunable in code.
+const priorContextThreshold = 200 * 1024
+
+// buildPriorContext flattens prior turns for the draft template. If the
+// total accumulated size exceeds priorContextThreshold, older turns are
+// collapsed into one "summary" entry.
+func buildPriorContext(turns []Turn) []map[string]string {
+	total := 0
+	for _, t := range turns {
+		total += len(t.UserMessage) + len(t.FinalSpec)
+	}
+	if total <= priorContextThreshold {
+		out := make([]map[string]string, len(turns))
+		for i, t := range turns {
+			out[i] = map[string]string{"UserMessage": t.UserMessage}
+		}
+		return out
+	}
+	if len(turns) == 0 {
+		return nil
+	}
+	last := turns[len(turns)-1]
+	older := turns[:len(turns)-1]
+	collapsed := fmt.Sprintf("[prior context summarized: %d earlier turns over %d bytes — see .aios/sessions/<id>/session.json for full history]",
+		len(older), total-len(last.UserMessage)-len(last.FinalSpec))
+	return []map[string]string{
+		{"UserMessage": collapsed},
+		{"UserMessage": last.UserMessage},
+	}
 }

@@ -345,3 +345,30 @@ func TestGeneratePolishFailsReturnsMerged(t *testing.T) {
 		t.Fatalf("expected polish-fallback warning; got %v", out.Warnings)
 	}
 }
+
+func TestGenerateSummarizesPriorTurnsAboveThreshold(t *testing.T) {
+	bigBody := strings.Repeat("A", 250*1024) // 250 KB > 200 KB threshold
+	prior := []Turn{{UserMessage: "old", FinalSpec: bigBody}}
+	claude := &engine.FakeEngine{Name_: "claude", Script: []engine.InvokeResponse{
+		{Text: "DRAFT_A"}, {Text: "POLISHED"},
+	}}
+	codex := &engine.FakeEngine{Name_: "codex", Script: []engine.InvokeResponse{
+		{Text: "DRAFT_B"}, {Text: "MERGED"},
+	}}
+	_, err := Generate(context.Background(), Input{
+		UserRequest: "new",
+		PriorTurns:  prior,
+		Claude:      claude,
+		Codex:       codex,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	stage1Prompt := claude.Received[0].Prompt
+	if strings.Contains(stage1Prompt, bigBody) {
+		t.Fatalf("draft prompt contained full prior turn body — summarization did not trigger")
+	}
+	if !strings.Contains(stage1Prompt, "[prior context summarized:") {
+		t.Fatalf("draft prompt missing summarization marker; got first 200 chars: %s", stage1Prompt[:200])
+	}
+}
