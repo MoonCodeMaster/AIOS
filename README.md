@@ -9,14 +9,36 @@ ready — the only human step in the loop.
 
 ---
 
+## Three ways to drive AIOS
+
+```
+aios                       # interactive REPL — talk, refine, /ship when ready
+aios "build X"             # one-shot spec → .aios/project.md, no execution
+aios --ship "build X"      # full pipeline: specgen → decompose → execute → PR → merge
+```
+
+All three run the same 4-stage dual-AI pipeline (Claude draft + Codex draft →
+Codex merge → Claude polish). The difference is what happens after the spec
+lands.
+
+For scripts: `aios -p "build X"` writes the polished spec to stdout, no side
+effects.
+
 ## Why AIOS exists
 
-Single-model AI coding loops fail the same way every time: the model that
-wrote the code is the one reviewing it, and so misses the exact class of
-errors it just introduced. "Claude checks its own PR" and "Codex reviews
-its own diff" both converge to the same blind spot.
+Two concrete goals:
 
-The only fix that holds up is structural:
+1. **Better plans, specs, code, and workflow than Claude or Codex CLI alone.**
+   Two models write the spec, a third pass merges them, a fourth polishes.
+   The same cross-model discipline runs through execution: the engine that
+   wrote the code is never the one reviewing it.
+2. **Less human input than Claude or Codex CLI.** A single prompt with
+   `--ship` runs spec → tasks → coder↔reviewer → PR → merge end-to-end. The
+   REPL collapses spec refinement into a chat instead of repeated re-prompts.
+
+Single-model coding loops fail the same way every time: the model that wrote
+the code is the one reviewing it, and so misses the exact class of errors it
+just introduced. The only fix that holds up is structural:
 
 - **The engine that writes is not the engine that reviews — ever.** Checked
   at config load *and* at runtime; an AIOS run refuses to start when
@@ -45,10 +67,13 @@ The only fix that holds up is structural:
 ## Pipeline
 
 ```
-   your spec
+   your prompt
        │
        ▼
-  aios new ──► brainstorm ──► spec ──► task DAG
+  specgen (Claude+Codex draft → Codex merge → Claude polish)
+       │
+       ▼
+  .aios/project.md ──► decompose ──► task DAG
                                          │
                                          ▼
                                  dependency-ordered worker pool
@@ -117,24 +142,30 @@ troubleshoot `--no-optional`, air-gapped mirrors, or Windows on ARM.
 cd your-repo
 aios init                          # writes .aios/config.toml; autodetects Go/Node/Python/Rust
 aios doctor                        # one-shot preflight: engines, auth, repo, config
-aios new "Add a /health endpoint with a unit test"
-# review the proposed spec + task list; confirm with `y`
-aios run                           # coder↔reviewer loop until aios/staging is green
-git log aios/staging               # audit the coder↔reviewer history
-git merge aios/staging             # you're the last human in the loop
+aios --ship "Add a /health endpoint with a unit test"
+# specgen → tasks → coder↔reviewer → PR → CI → merge to main, no further prompts.
+```
+
+If you want to inspect the spec before anything ships, drop `--ship`:
+
+```bash
+aios "Add a /health endpoint with a unit test"
+# writes .aios/project.md and exits. Edit, then `aios --ship` (no prompt) ships
+# the existing spec, or run `aios` for an interactive refinement loop.
 ```
 
 ## Command index
 
 | Command | What it does |
 |---|---|
-| `aios` | Interactive entry point — each turn produces a unified spec via the dual-AI pipeline; `/ship` hands off to autopilot. |
+| `aios` | Interactive REPL. Each turn produces a unified spec via the dual-AI pipeline; `/ship` hands off to the autopilot. |
+| `aios "<prompt>"` | One-shot specgen. Writes `.aios/project.md` and exits. |
+| `aios --ship "<prompt>"` | Full pipeline: specgen → decompose → execute → PR → merge. |
+| `aios -p "<prompt>"` | Print polished spec to stdout. No project.md write, no side effects. |
+| `aios --continue [<id>]` | Resume the latest REPL session, or a specific session id. |
 | `aios init` | Bootstrap `.aios/config.toml` for the current repo. |
 | `aios doctor` | One-shot preflight — engines, auth, git, config, smoke-test. |
-| `aios new <idea>` | Brainstorm → spec → task list. Confirms before commit. |
 | `aios run` | Iterate over pending tasks; coder↔reviewer per task. |
-| `aios autopilot <idea>` | `new --auto` then `run --autopilot --merge` end-to-end. |
-| `aios architect <idea>` | 4-round mind-map planner — pick from 3 finalists, then autopilot. |
 | `aios duel <task>` | Race Claude and Codex on the same task; reviewer picks the winner. |
 | `aios review <pr>` | Cross-model PR review; optional comment-back via `gh pr comment`. |
 | `aios serve` | Issue-bot daemon — watches `aios:do`-labeled GitHub issues. |
@@ -188,65 +219,24 @@ drafts becomes the merged version. If polish fails, the merged version is the
 final. With either Claude or Codex missing from PATH the REPL refuses to launch
 — run `aios doctor` to diagnose.
 
-`aios new` and `aios architect` remain for users who want the legacy single-shot
-or three-blueprint flows.
-
-## Autopilot mode (no human input)
-
-For end-to-end runs with no prompts and no manual `git merge`:
+## Ship mode (one prompt to merged PR)
 
 ```bash
-cd your-repo
-aios init
-aios autopilot "Add a /health endpoint with a unit test"
-# spec → tasks → coder↔reviewer → PR → CI → merge to main
-# Stalled tasks abandon locally with a full audit trail; the rest of the run
-# proceeds. CI red leaves the PR open and exits non-zero.
+aios --ship "Add a /health endpoint with a unit test"
 ```
+
+Runs specgen, writes `.aios/project.md`, decomposes into task files, runs the
+coder↔reviewer loop, opens a PR, polls CI, and merges on green. Same plumbing
+as the REPL's `/ship` command and as `aios serve` — they all call the same
+`ShipPrompt` entry point.
 
 Requires: `gh` CLI authenticated (`gh auth login`) and a configured git remote.
 Stalled tasks land under `.aios/runs/<id>/abandoned/<task>/` for later review.
 
-## Architect mode (one keystroke from idea to merged PR)
-
-Where `aios autopilot` takes one idea and runs the first reasonable plan, `aios
-architect` takes one idea and gives you **three deliberately different mind
-maps** to choose between — each one stress-tested by both Claude and Codex
-before you ever see it.
-
-```bash
-cd your-repo
-aios init
-aios architect "Build a Slack bot that posts daily standups from GitHub activity"
-# 1. Claude and Codex each propose blueprints in parallel.
-# 2. Each model critiques the OTHER's proposals.
-# 3. Each author refines its own from the critique.
-# 4. The reviewer-default model synthesises three finalists:
-#    1) conservative   2) balanced   3) ambitious
-# Pick blueprint [1/2/3]: 2
-# spec → tasks → coder↔reviewer → PR → CI → merge to main, no further prompts.
-```
-
-Add `--auto` (or `--pick N`) for fully unattended runs. Every round's prompt
-and raw response is persisted under `.aios/runs/<id>/architect/` so you can
-inspect exactly what each model said at every step. Same `gh` + git-remote
-requirements as autopilot.
-
-Why this beats running `claude` or `codex` directly:
-
-- **Three mental models, not one.** Single-model planning gives you the first
-  reasonable answer. Architect gives you a conservative, a balanced, and an
-  ambitious framing — picked for distinctness, not just diversity of wording.
-- **Mutual critique baked in.** Each blueprint has been read and challenged by
-  the *other* engine before it reaches you, so the obvious gaps are already
-  closed.
-- **One keystroke to merged PR.** After you pick, the same coder↔reviewer
-  loop, worktree isolation, audit trail, and PR-merge pipeline run for free.
-
 ### Auto-decompose for stalled tasks
 
 When a task stalls — repeated rounds raise the same unresolved reviewer issues
-even after escalation — autopilot tries to split it before giving up:
+even after escalation — ship mode tries to split it before giving up:
 
 1. Claude and Codex each independently propose a 2–4 sub-task split.
 2. Whichever engine reviewed the stuck task synthesises the two proposals
@@ -331,10 +321,10 @@ Idempotent. Re-running with the same preset is a no-op.
 
 ## Serve mode (issue bot)
 
-`aios serve` watches a GitHub repo for issues labeled `aios:do` and runs
-autopilot for each one. The bot opens the PR, comments back on the issue with
-the PR link, closes the issue on merge, and files an `aios:stuck` issue with
-the audit trail when autopilot abandons.
+`aios serve` watches a GitHub repo for issues labeled `aios:do` and ships each
+one. The bot opens the PR, comments back on the issue with the PR link, closes
+the issue on merge, and files an `aios:stuck` issue with the audit trail when
+the run abandons.
 
 ```bash
 gh auth login                                # one-time
@@ -423,16 +413,6 @@ The structured `BlockReason` codes (`stall_no_progress`, `max_rounds_exceeded`,
 The value of AIOS is not "another wrapper around an LLM CLI" — it's that every
 single-model failure mode that makes autonomous coding unsafe has a named,
 enforced countermeasure that shows up in both the config and the code.
-
-## Commands
-
-| Command | Purpose |
-|---|---|
-| `aios init` | Bootstrap the repo; autodetect verify commands. |
-| `aios new "<idea>"` | Brainstorm → spec → task decomposition. |
-| `aios run` | Iterate pending tasks; coder↔reviewer loop; auto-merge to `aios/staging`. |
-| `aios status` | Print current task list with status. |
-| `aios resume <id>` | Unblock a blocked task with a note. |
 
 ## Configuration highlights
 
