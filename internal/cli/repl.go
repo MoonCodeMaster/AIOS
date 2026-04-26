@@ -211,18 +211,9 @@ func (r *Repl) ship(ctx context.Context) error {
 // runAutopilotShip drives `aios run --autopilot --merge` against the spec
 // already on disk at <wd>/.aios/project.md. Equivalent to typing `aios
 // autopilot` after `aios new --auto` has run.
-func runAutopilotShip(_ context.Context, wd string) error {
-	if err := decomposeOnly(wd); err != nil {
-		return fmt.Errorf("decompose: %w", err)
-	}
-	runCmd := newRunCmd()
-	if err := runCmd.Flags().Set("autopilot", "true"); err != nil {
-		return fmt.Errorf("set --autopilot: %w", err)
-	}
-	if err := runCmd.Flags().Set("merge", "true"); err != nil {
-		return fmt.Errorf("set --merge: %w", err)
-	}
-	return runMain(runCmd, nil)
+func runAutopilotShip(ctx context.Context, wd string) error {
+	_, err := ShipSpec(ctx, wd)
+	return err
 }
 
 // readMessage reads lines until a blank line (submit) or EOF.
