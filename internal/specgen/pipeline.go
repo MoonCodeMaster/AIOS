@@ -2,12 +2,12 @@ package specgen
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/run"
 	"github.com/MoonCodeMaster/AIOS/internal/specgen/prompts"
 )
 
@@ -49,16 +49,54 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 	c := <-claudeCh
 	x := <-codexCh
 	out.Stages = append(out.Stages, c.metric, x.metric)
-	if c.metric.Err != "" {
-		return out, fmt.Errorf("stage draft-claude: %s", c.metric.Err)
-	}
-	if x.metric.Err != "" {
-		return out, fmt.Errorf("stage draft-codex: %s", x.metric.Err)
-	}
 	out.DraftClaude = c.text
 	out.DraftCodex = x.text
 
-	// Stage 3: Codex merge
+	claudeOK := c.metric.Err == ""
+	codexOK := x.metric.Err == ""
+
+	switch {
+	case !claudeOK && !codexOK:
+		out.Stages = append(out.Stages,
+			StageMetric{Name: "merge", Engine: "codex", Skipped: true},
+			StageMetric{Name: "polish", Engine: "claude", Skipped: true},
+		)
+		persist(in.Recorder, out)
+		return out, fmt.Errorf("both drafters failed: claude=%q codex=%q", c.metric.Err, x.metric.Err)
+
+	case !claudeOK || !codexOK:
+		var surviving, survName string
+		var survEngine engine.Engine
+		var failedName string
+		if claudeOK {
+			surviving, survName, survEngine = c.text, "claude", in.Claude
+			failedName = "Codex"
+		} else {
+			surviving, survName, survEngine = x.text, "codex", in.Codex
+			failedName = "Claude"
+		}
+		out.Warnings = append(out.Warnings,
+			fmt.Sprintf("%s draft failed; spec built from %s alone — consider rerunning.", failedName, survName))
+		out.Stages = append(out.Stages, StageMetric{
+			Name: "merge", Engine: "codex", Skipped: true, Fallback: "single-draft",
+		})
+		polishPrompt, err := prompts.Render("polish.tmpl", map[string]string{"Merged": surviving})
+		if err != nil {
+			return out, fmt.Errorf("render polish prompt: %w", err)
+		}
+		polishedText, m4 := runStage(ctx, "polish", survName, survEngine, polishPrompt, in.OnStageStart, in.OnStageEnd)
+		out.Stages = append(out.Stages, m4)
+		if m4.Err != "" {
+			out.Warnings = append(out.Warnings, fmt.Sprintf("Polish step failed; spec is the surviving draft. (%s)", m4.Err))
+			out.Final = surviving
+		} else {
+			out.Final = polishedText
+		}
+		persist(in.Recorder, out)
+		return out, nil
+	}
+
+	// Both drafts succeeded — normal merge + polish path.
 	mergePrompt, err := prompts.Render("merge.tmpl", map[string]string{
 		"DraftClaude": out.DraftClaude,
 		"DraftCodex":  out.DraftCodex,
@@ -69,11 +107,11 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 	mergedText, m3 := runStage(ctx, "merge", "codex", in.Codex, mergePrompt, in.OnStageStart, in.OnStageEnd)
 	out.Stages = append(out.Stages, m3)
 	if m3.Err != "" {
+		// Stage 3 fallback handled in Task 7.
 		return out, fmt.Errorf("stage merge: %s", m3.Err)
 	}
 	out.Merged = mergedText
 
-	// Stage 4: Claude polish
 	polishPrompt, err := prompts.Render("polish.tmpl", map[string]string{"Merged": out.Merged})
 	if err != nil {
 		return out, fmt.Errorf("render polish prompt: %w", err)
@@ -81,21 +119,33 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 	polishedText, m4 := runStage(ctx, "polish", "claude", in.Claude, polishPrompt, in.OnStageStart, in.OnStageEnd)
 	out.Stages = append(out.Stages, m4)
 	if m4.Err != "" {
+		// Stage 4 fallback handled in Task 8.
 		return out, fmt.Errorf("stage polish: %s", m4.Err)
 	}
 	out.Final = polishedText
-
-	if in.Recorder != nil {
-		_ = in.Recorder.WriteFile("specgen/draft-claude.md", []byte(out.DraftClaude))
-		_ = in.Recorder.WriteFile("specgen/draft-codex.md", []byte(out.DraftCodex))
-		_ = in.Recorder.WriteFile("specgen/merged.md", []byte(out.Merged))
-		_ = in.Recorder.WriteFile("specgen/final.md", []byte(out.Final))
-		if data, err := json.MarshalIndent(out.Stages, "", "  "); err == nil {
-			_ = in.Recorder.WriteFile("specgen/stages.json", data)
-		}
-	}
-
+	persist(in.Recorder, out)
 	return out, nil
+}
+
+// persist writes intermediate drafts and stage metrics to the recorder.
+// Best-effort — never fail the pipeline if a debug write errors.
+func persist(rec *run.Recorder, out Output) {
+	if rec == nil {
+		return
+	}
+	if out.DraftClaude != "" {
+		_ = rec.WriteFile("specgen/draft-claude.md", []byte(out.DraftClaude))
+	}
+	if out.DraftCodex != "" {
+		_ = rec.WriteFile("specgen/draft-codex.md", []byte(out.DraftCodex))
+	}
+	if out.Merged != "" {
+		_ = rec.WriteFile("specgen/merged.md", []byte(out.Merged))
+	}
+	if out.Final != "" {
+		_ = rec.WriteFile("specgen/final.md", []byte(out.Final))
+	}
+	_ = rec.WriteJSON("specgen/stages.json", out.Stages)
 }
 
 func runStage(ctx context.Context, name, engineName string, eng engine.Engine, prompt string,

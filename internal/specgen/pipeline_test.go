@@ -172,3 +172,72 @@ func TestGeneratePersistsIntermediates(t *testing.T) {
 		t.Fatalf("stages.json had %d entries, want 4", len(stages))
 	}
 }
+
+// errEngine returns the same error on every call.
+type errEngine struct {
+	name string
+	err  error
+}
+
+func (e *errEngine) Name() string { return e.name }
+func (e *errEngine) Invoke(_ context.Context, _ engine.InvokeRequest) (*engine.InvokeResponse, error) {
+	return nil, e.err
+}
+
+func TestGenerateClaudeDraftFailsThenSingleDraftFlow(t *testing.T) {
+	claude := &errEngine{name: "claude", err: errors.New("claude offline")}
+	codex := &engine.FakeEngine{Name_: "codex", Script: []engine.InvokeResponse{
+		{Text: "DRAFT_B"},
+		{Text: "POLISHED_BY_CODEX"}, // codex stands in for polish too
+	}}
+
+	out, err := Generate(context.Background(), Input{
+		UserRequest: "x", Claude: claude, Codex: codex,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if out.Final != "POLISHED_BY_CODEX" {
+		t.Fatalf("Final = %q, want POLISHED_BY_CODEX", out.Final)
+	}
+	if out.DraftCodex != "DRAFT_B" {
+		t.Fatalf("DraftCodex = %q", out.DraftCodex)
+	}
+	if out.DraftClaude != "" {
+		t.Fatalf("DraftClaude should be empty when Claude failed; got %q", out.DraftClaude)
+	}
+	if len(out.Warnings) == 0 || !strings.Contains(out.Warnings[0], "Claude") {
+		t.Fatalf("expected warning about Claude failure; got %v", out.Warnings)
+	}
+	stagesByName := map[string]StageMetric{}
+	for _, s := range out.Stages {
+		stagesByName[s.Name] = s
+	}
+	if s := stagesByName["draft-claude"]; s.Err == "" {
+		t.Fatalf("draft-claude stage Err should be non-empty")
+	}
+	if s := stagesByName["merge"]; !s.Skipped {
+		t.Fatalf("merge stage should be Skipped when only one draft survives")
+	}
+}
+
+func TestGenerateCodexDraftFailsThenSingleDraftFlow(t *testing.T) {
+	codex := &errEngine{name: "codex", err: errors.New("codex offline")}
+	claude := &engine.FakeEngine{Name_: "claude", Script: []engine.InvokeResponse{
+		{Text: "DRAFT_A"},
+		{Text: "POLISHED_BY_CLAUDE"},
+	}}
+
+	out, err := Generate(context.Background(), Input{
+		UserRequest: "x", Claude: claude, Codex: codex,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if out.Final != "POLISHED_BY_CLAUDE" {
+		t.Fatalf("Final = %q", out.Final)
+	}
+	if len(out.Warnings) == 0 || !strings.Contains(out.Warnings[0], "Codex") {
+		t.Fatalf("expected warning about Codex failure; got %v", out.Warnings)
+	}
+}
