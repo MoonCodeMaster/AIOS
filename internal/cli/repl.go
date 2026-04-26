@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -25,12 +26,29 @@ type Repl struct {
 	Codex   engine.Engine
 	NoColor bool
 
+	ClaudeBinary string
+	CodexBinary  string
+	LookPath     func(string) (string, error) // injectable for tests; defaults to exec.LookPath
+
 	session *Session
 	outMu   sync.Mutex // guards Out against concurrent stage callbacks
 }
 
 // Run executes the REPL turn loop until /exit, EOF, or /ship.
 func (r *Repl) Run(ctx context.Context) error {
+	if r.LookPath == nil {
+		r.LookPath = exec.LookPath
+	}
+	if r.ClaudeBinary != "" {
+		if _, err := r.LookPath(r.ClaudeBinary); err != nil {
+			return fmt.Errorf("claude CLI not found (%s): run `aios doctor`", r.ClaudeBinary)
+		}
+	}
+	if r.CodexBinary != "" {
+		if _, err := r.LookPath(r.CodexBinary); err != nil {
+			return fmt.Errorf("codex CLI not found (%s): run `aios doctor`", r.CodexBinary)
+		}
+	}
 	if err := r.bootSession(); err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -101,5 +102,24 @@ func TestReplHelpListsCommands(t *testing.T) {
 		if !strings.Contains(out, expected) {
 			t.Fatalf("/help missing %s; got: %s", expected, out)
 		}
+	}
+}
+
+func TestReplRefusesWhenCLIMissing(t *testing.T) {
+	wd := t.TempDir()
+	r := &Repl{
+		Wd:           wd,
+		In:           strings.NewReader(""),
+		Out:          &bytes.Buffer{},
+		ClaudeBinary: "this-binary-does-not-exist-aios-test",
+		CodexBinary:  "codex",
+		LookPath:     exec.LookPath,
+	}
+	err := r.Run(context.Background())
+	if err == nil {
+		t.Fatalf("Run should have returned an error when claude binary is missing")
+	}
+	if !strings.Contains(err.Error(), "claude") {
+		t.Fatalf("error should mention missing claude; got: %v", err)
 	}
 }
