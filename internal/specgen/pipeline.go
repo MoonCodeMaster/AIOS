@@ -3,13 +3,94 @@ package specgen
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
+
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
+	"github.com/MoonCodeMaster/AIOS/internal/specgen/prompts"
 )
 
-// Generate runs the 4-stage dual-AI pipeline and returns the unified spec.
-// See docs/superpowers/specs/2026-04-26-aios-interactive-specgen-design.md.
 func Generate(ctx context.Context, in Input) (Output, error) {
 	if in.Claude == nil || in.Codex == nil {
 		return Output{}, errors.New("specgen: Claude and Codex engines are required")
 	}
-	return Output{}, errors.New("specgen: not implemented")
+	out := Output{}
+
+	priorForTmpl := make([]map[string]string, len(in.PriorTurns))
+	for i, t := range in.PriorTurns {
+		priorForTmpl[i] = map[string]string{"UserMessage": t.UserMessage}
+	}
+	draftPrompt, err := prompts.Render("draft.tmpl", map[string]any{
+		"UserRequest":    in.UserRequest,
+		"CurrentSpec":    in.CurrentSpec,
+		"PriorTurns":     priorForTmpl,
+		"ProjectContext": in.ProjectContext,
+	})
+	if err != nil {
+		return out, fmt.Errorf("render draft prompt: %w", err)
+	}
+
+	// Stage 1: Claude draft
+	claudeText, m1 := runStage(ctx, "draft-claude", "claude", in.Claude, draftPrompt, in.OnStageStart, in.OnStageEnd)
+	out.Stages = append(out.Stages, m1)
+	if m1.Err != "" {
+		return out, fmt.Errorf("stage draft-claude: %s", m1.Err)
+	}
+	out.DraftClaude = claudeText
+
+	// Stage 2: Codex draft
+	codexText, m2 := runStage(ctx, "draft-codex", "codex", in.Codex, draftPrompt, in.OnStageStart, in.OnStageEnd)
+	out.Stages = append(out.Stages, m2)
+	if m2.Err != "" {
+		return out, fmt.Errorf("stage draft-codex: %s", m2.Err)
+	}
+	out.DraftCodex = codexText
+
+	// Stage 3: Codex merge
+	mergePrompt, err := prompts.Render("merge.tmpl", map[string]string{
+		"DraftClaude": out.DraftClaude,
+		"DraftCodex":  out.DraftCodex,
+	})
+	if err != nil {
+		return out, fmt.Errorf("render merge prompt: %w", err)
+	}
+	mergedText, m3 := runStage(ctx, "merge", "codex", in.Codex, mergePrompt, in.OnStageStart, in.OnStageEnd)
+	out.Stages = append(out.Stages, m3)
+	if m3.Err != "" {
+		return out, fmt.Errorf("stage merge: %s", m3.Err)
+	}
+	out.Merged = mergedText
+
+	// Stage 4: Claude polish
+	polishPrompt, err := prompts.Render("polish.tmpl", map[string]string{"Merged": out.Merged})
+	if err != nil {
+		return out, fmt.Errorf("render polish prompt: %w", err)
+	}
+	polishedText, m4 := runStage(ctx, "polish", "claude", in.Claude, polishPrompt, in.OnStageStart, in.OnStageEnd)
+	out.Stages = append(out.Stages, m4)
+	if m4.Err != "" {
+		return out, fmt.Errorf("stage polish: %s", m4.Err)
+	}
+	out.Final = polishedText
+
+	return out, nil
+}
+
+func runStage(ctx context.Context, name, engineName string, eng engine.Engine, prompt string,
+	onStart func(string), onEnd func(string, error)) (string, StageMetric) {
+	if onStart != nil {
+		onStart(name)
+	}
+	t0 := time.Now()
+	resp, err := eng.Invoke(ctx, engine.InvokeRequest{Role: engine.RoleCoder, Prompt: prompt})
+	if onEnd != nil {
+		onEnd(name, err)
+	}
+	m := StageMetric{Name: name, Engine: engineName, DurationMs: int(time.Since(t0).Milliseconds())}
+	if err != nil {
+		m.Err = err.Error()
+		return "", m
+	}
+	m.TokensUsed = resp.UsageTokens
+	return resp.Text, m
 }
