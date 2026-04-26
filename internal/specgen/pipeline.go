@@ -127,10 +127,12 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 	polishedText, m4 := runStage(ctx, "polish", "claude", in.Claude, polishPrompt, in.OnStageStart, in.OnStageEnd)
 	out.Stages = append(out.Stages, m4)
 	if m4.Err != "" {
-		// Stage 4 fallback handled in Task 8.
-		return out, fmt.Errorf("stage polish: %s", m4.Err)
+		out.Warnings = append(out.Warnings,
+			fmt.Sprintf("Polish step failed; spec is the merged version. (%s)", m4.Err))
+		out.Final = out.Merged
+	} else {
+		out.Final = polishedText
 	}
-	out.Final = polishedText
 	persist(in.Recorder, out)
 	return out, nil
 }

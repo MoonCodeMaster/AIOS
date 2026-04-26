@@ -321,3 +321,27 @@ func TestGenerateMergeFailsFallsBackToLongerDraft(t *testing.T) {
 		t.Fatalf("expected merge-fallback warning; got %v", out.Warnings)
 	}
 }
+
+func TestGeneratePolishFailsReturnsMerged(t *testing.T) {
+	claude := &scriptedErrEngine{name: "claude", responses: []scriptedErrResponse{
+		{text: "DRAFT_A"},
+		{err: errors.New("claude polish failed")}, // stage 4
+	}}
+	codex := &scriptedErrEngine{name: "codex", responses: []scriptedErrResponse{
+		{text: "DRAFT_B"},
+		{text: "MERGED_FINAL"},
+	}}
+
+	out, err := Generate(context.Background(), Input{
+		UserRequest: "x", Claude: claude, Codex: codex,
+	})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if out.Final != "MERGED_FINAL" {
+		t.Fatalf("Final = %q, want MERGED_FINAL (polish fallback)", out.Final)
+	}
+	if len(out.Warnings) == 0 || !strings.Contains(out.Warnings[0], "Polish") {
+		t.Fatalf("expected polish-fallback warning; got %v", out.Warnings)
+	}
+}
