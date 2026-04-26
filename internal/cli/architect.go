@@ -231,7 +231,7 @@ func writeBlueprintAsSpec(ctx context.Context, wd, idea string, bp architect.Blu
 	if err != nil {
 		return err
 	}
-	return commitNewSpec(wd, cfg.Project.StagingBranch, idea+" (architect)")
+	return commitSpec(wd, cfg.Project.StagingBranch, idea+" (architect)")
 }
 
 func persistArchitectArtifacts(rec *run.Recorder, artifacts map[string]string) error {

@@ -12,9 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MoonCodeMaster/AIOS/internal/config"
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
-	"github.com/MoonCodeMaster/AIOS/internal/engine/prompts"
 	"github.com/MoonCodeMaster/AIOS/internal/run"
 	"github.com/MoonCodeMaster/AIOS/internal/specgen"
 )
@@ -225,42 +223,6 @@ func runAutopilotShip(_ context.Context, wd string) error {
 		return fmt.Errorf("set --merge: %w", err)
 	}
 	return runMain(runCmd, nil)
-}
-
-// decomposeOnly turns the existing .aios/project.md into task files,
-// reusing the same decompose prompt as `aios new` but skipping
-// brainstorm and spec-synth (the spec is already final).
-func decomposeOnly(wd string) error {
-	specPath := filepath.Join(wd, ".aios", "project.md")
-	specBody, err := os.ReadFile(specPath)
-	if err != nil {
-		return fmt.Errorf("read project.md: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return err
-	}
-	codex := &engine.CodexEngine{
-		Binary:     cfg.Engines.Codex.Binary,
-		ExtraArgs:  cfg.Engines.Codex.ExtraArgs,
-		TimeoutSec: cfg.Engines.Codex.TimeoutSec,
-	}
-	dPrompt, err := prompts.Render("decompose.tmpl", map[string]string{"Spec": string(specBody)})
-	if err != nil {
-		return err
-	}
-	dRes, err := codex.Invoke(context.Background(), engine.InvokeRequest{Role: engine.RoleCoder, Prompt: dPrompt})
-	if err != nil {
-		return err
-	}
-	tasksDir := filepath.Join(wd, ".aios", "tasks")
-	if err := os.MkdirAll(tasksDir, 0o755); err != nil {
-		return err
-	}
-	if _, err := writeTaskFiles(tasksDir, dRes.Text); err != nil {
-		return err
-	}
-	return commitNewSpec(wd, cfg.Project.StagingBranch, "interactive session")
 }
 
 // readMessage reads lines until a blank line (submit) or EOF.

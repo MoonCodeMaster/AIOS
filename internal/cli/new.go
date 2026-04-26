@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -98,55 +97,9 @@ func runNew(opts NewOpts) error {
 		}
 	}
 
-	if err := commitNewSpec(wd, cfg.Project.StagingBranch, opts.Idea); err != nil {
+	if err := commitSpec(wd, cfg.Project.StagingBranch, opts.Idea); err != nil {
 		return err
 	}
 	fmt.Println("Committed to " + cfg.Project.StagingBranch)
 	return nil
-}
-
-func writeTaskFiles(dir, raw string) (int, error) {
-	parts := strings.Split(raw, "\n===TASK===\n")
-	count := 0
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		id := extractTaskID(p)
-		if id == "" {
-			continue
-		}
-		path := filepath.Join(dir, id+".md")
-		if err := os.WriteFile(path, []byte(p+"\n"), 0o644); err != nil {
-			return count, err
-		}
-		count++
-	}
-	return count, nil
-}
-
-func extractTaskID(frontmatter string) string {
-	for _, ln := range strings.Split(frontmatter, "\n") {
-		ln = strings.TrimSpace(ln)
-		if strings.HasPrefix(ln, "id:") {
-			return strings.TrimSpace(strings.TrimPrefix(ln, "id:"))
-		}
-	}
-	return ""
-}
-
-func commitNewSpec(wd, staging, idea string) error {
-	stash := exec.Command("git", "-C", wd, "stash", "-u")
-	_ = stash.Run()
-	chk := exec.Command("git", "-C", wd, "checkout", staging)
-	if err := chk.Run(); err != nil {
-		return err
-	}
-	add := exec.Command("git", "-C", wd, "add", ".aios")
-	if err := add.Run(); err != nil {
-		return err
-	}
-	msg := "aios: spec and tasks for " + idea
-	return exec.Command("git", "-C", wd, "commit", "-m", msg).Run()
 }
