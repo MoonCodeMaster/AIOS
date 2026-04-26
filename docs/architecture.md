@@ -31,6 +31,53 @@ aios new --auto ──► brainstorm ──► spec ──► task DAG (one .md 
                                             main
 ```
 
+## Architect mode (front door)
+
+`aios architect "<idea>"` puts a 4-round mind-map planner in front of the
+pipeline above. Same engines, same merge queue, same audit trail — the only
+new component is `internal/architect`, which orchestrates the multi-model
+proposal/critique/refine/synthesize sequence.
+
+```
+your idea
+   │
+   ▼
+aios architect ──► R1 propose (Claude × 2 ‖ Codex × 1)
+                       │
+                       ▼
+                   R2 critique (each model on the OTHER's blueprints, in parallel)
+                       │
+                       ▼
+                   R3 refine   (each author on its own blueprints)
+                       │
+                       ▼
+                   R4 synthesize (reviewer-default engine emits 3 finalists)
+                       │
+                       ▼
+              user picks 1 / 2 / 3   (--pick or --auto skips)
+                       │
+                       ▼
+            bp-to-spec ──► .aios/project.md ──► decompose ──► .aios/tasks/*
+                       │
+                       ▼
+            (drops into the standard autopilot pipeline at the top of this doc)
+```
+
+Every round's prompt and raw response is persisted under
+`.aios/runs/<id>/architect/` (e.g. `1-claude.txt`, `2-codex-on-claude.txt`,
+`4-synthesis.txt`, `chosen.txt`). The synthesizer is wired to the project's
+`reviewer_default` engine so the writer/reviewer cross-model invariant
+extends through planning as well as execution.
+
+Failure modes:
+
+- Both proposers error → architect aborts (no fallback worth running).
+- Synthesis errors or returns < 3 valid blueprints → fall back to the
+  refined pool from R3 (logged via `UsedFallback`); finalists may be less
+  distinct but the user still gets three to pick from.
+- Critique errors are non-fatal — refinement just runs on the original
+  blueprints with no critique notes.
+
 ## Components
 
 ### Orchestrator (`internal/orchestrator`)
