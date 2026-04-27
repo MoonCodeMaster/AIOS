@@ -17,9 +17,9 @@ aios "build X"             # one-shot spec → .aios/project.md, no execution
 aios --ship "build X"      # full pipeline: specgen → decompose → execute → PR → merge
 ```
 
-All three run the same 4-stage dual-AI pipeline (Claude draft + Codex draft →
-Codex merge → Claude polish). The difference is what happens after the spec
-lands.
+All three run the same dual-AI specgen pipeline (Claude draft + Codex draft →
+Codex merge → Claude polish → cross-model critique → optional refine). The
+difference is what happens after the spec lands.
 
 For scripts: `aios -p "build X"` writes the polished spec to stdout, no side
 effects.
@@ -43,6 +43,10 @@ just introduced. The only fix that holds up is structural:
 - **The engine that writes is not the engine that reviews — ever.** Checked
   at config load *and* at runtime; an AIOS run refuses to start when
   `coder_default == reviewer_default`.
+- **Cross-model critique on every spec.** After polish, the engine NOT used
+  for polish scores the spec on a 0–12 rubric; below threshold triggers one
+  refine cycle on the polish engine. Hallucinations and gaps that the same
+  model can't see in its own output get caught by the other.
 - **Every round's full prompt and raw response is persisted** before the next
   round begins. You can reconstruct exactly what each model saw and said,
   without re-running anything.
@@ -52,16 +56,22 @@ just introduced. The only fix that holds up is structural:
 - **Verify failures feed the reviewer as blocking issues.** Approved-but-red
   code cannot merge. Stuck loops stop and tell you why — with the reviewer's
   top unresolved issues in the block reason.
+- **Spec-level escalation when execution fails wholesale.** When multiple
+  sibling tasks abandon with overlapping reviewer issues, AIOS regenerates
+  the spec with the failure feedback folded in and retries — once per ship.
 
 ## Core advantages
 
 | Advantage | How AIOS does it |
 |---|---|
 | **Cross-model review (mandatory)** | Config rejects `coder==reviewer`; runtime `engine.PickPair` rechecks. One engine's blind spots get caught by the other. |
+| **Cross-model spec critique** | After polish, the engine NOT used for polish scores the spec on a 0–12 rubric. Score < threshold (default 9) → one refine cycle on the polish engine. Catches hallucinated APIs and vague requirements before any code is written. |
 | **Full per-round audit trail** | `coder.prompt.txt`, `coder.response.raw`, `reviewer.prompt.txt`, `reviewer.response.raw`, `verify.json`, `reviewer-response.json` persisted per round. |
 | **Per-task `git worktree` isolation** | Every task gets `aios/task/<id>` on its own checkout. Startup GC sweeps orphans from crashed prior runs; branches preserved for history. |
 | **Verify↔review closed loop** | Red verify is folded into reviewer issues as synthetic blockers. Approval requires all criteria satisfied *and* all checks green. |
-| **Structured escalation & stall** | Repeated identical rejections trigger a hard-constraint retry round; if that fails the task blocks with `[NEEDS HUMAN]` and the top reviewer issues in the detail. |
+| **Three-tier stall recovery** | Stall → hard-constraint retry round → auto-decompose into sub-tasks (Claude+Codex propose, reviewer synthesises) → spec-level respec when sibling tasks abandon with overlapping issues → `[NEEDS HUMAN]` block with structured reasons. |
+| **Engine-level retry** | Transient `claude` / `codex` failures retried up to 3× with exponential backoff. Failed attempts recorded in `coder.attempts.json` / `reviewer.attempts.json`. |
+| **Round-history compression** | Once a chain exceeds 2 rounds, older context is compressed (algorithmic by default, optional LLM strategy) into `compressed-prior.txt`, keeping later rounds inside token budget without losing prior decisions. |
 | **Deny-by-default MCP scoping** | Per-task `mcp_allow` intersected with run-wide config. Every MCP call logged to `round-N/mcp-calls.json`. |
 
 ## Pipeline
@@ -70,7 +80,7 @@ just introduced. The only fix that holds up is structural:
    your prompt
        │
        ▼
-  specgen (Claude+Codex draft → Codex merge → Claude polish)
+  specgen (draft → merge → polish → cross-model critique → optional refine)
        │
        ▼
   .aios/project.md ──► decompose ──► task DAG
@@ -196,15 +206,23 @@ Spec updated (84 lines). /show to view, /ship to implement, or refine with anoth
 shipping spec to autopilot…
 ```
 
-Each turn runs a 4-stage dual-AI pipeline:
+Each turn runs a multi-stage dual-AI pipeline:
 
 1. Claude drafts spec A.
 2. Codex drafts spec B (in parallel with stage 1).
 3. Codex merges A and B into one spec, with initial polish.
 4. Claude does a secondary refinement on the merged spec.
+5. **Cross-model critique** — Codex (the engine NOT used for polish) scores
+   the result on a 0–12 rubric covering coverage, specificity, and
+   feasibility.
+6. **Optional refine** — if score is below `[specgen] critique_threshold`
+   (default 9), Claude runs one refine cycle using the critique as
+   guidance. Otherwise the polished spec ships as-is.
 
-The final spec is written to `.aios/project.md`. The four intermediate drafts
-land under `.aios/runs/<run-id>/specgen/` so you can see what each stage
+The final spec is written to `.aios/project.md`. Every intermediate stage —
+`1-draft-claude.md`, `2-draft-codex.md`, `3-merge.md`, `4-polish.md`,
+`5-critique.md`, `5-score.json`, and (when triggered) `6-refine.md` — lands
+under `.aios/runs/<run-id>/specgen/` so you can see what each stage
 contributed.
 
 Slash commands: `/show`, `/clear`, `/help`, `/ship`, `/exit`.
@@ -248,6 +266,21 @@ Recursion is bounded by `[budget] max_decompose_depth` (default 2, hard cap 3).
 A child that re-stalls at the depth cap abandons rather than recursively splits.
 If both engines error, or the synthesizer emits fewer than 2 sub-tasks, the
 parent abandons via the audit-trail path described above.
+
+### Spec-level respec on overlapping abandons
+
+When auto-decompose has already failed and **two or more sibling tasks abandon
+with reviewer-issue fingerprints that overlap** (pairwise Jaccard ≥
+`[budget] respec_min_overlap_score`, default 0.5), the failure is no longer
+local — the spec itself is suspect. AIOS regenerates the spec with the failure
+feedback folded in and retries the run once.
+
+- Triggered at most once per ship (`respec_on_abandon`, default `true`).
+- Audit artifacts written to `.aios/runs/<run-id>/respec/`:
+  `feedback.md` (issues fed into the new spec), `new-project.md` (regenerated
+  spec), `old-tasks/` (the abandoned siblings preserved for inspection).
+- If the second pass also abandons, the run reports `[NEEDS HUMAN]` —
+  re-running won't help.
 
 ## Duel mode (race Claude and Codex on one task)
 
@@ -350,7 +383,7 @@ done        = "aios:done"
 interval_sec = 60
 
 [concurrency]
-max_concurrent_issues = 1   # clamped to 1 in v0.5.0
+max_concurrent_issues = 1   # clamped to 1 in current release
 ```
 
 State persists at `.aios/serve/state.json`. A killed daemon reconciles on
@@ -482,20 +515,32 @@ verify↔review, escalation, full audit persistence) is implemented and covered
 by unit and integration tests. Nightly end-to-end tests drive real Claude and
 Codex through a small corpus of scenarios; see [`docs/e2e-setup.md`](docs/e2e-setup.md).
 
+What v0.2.0 added on top of v0.1:
+
+- **Cross-model spec critique** with score-gated refine cycle (`[specgen]
+  critique_enabled`, `critique_threshold`).
+- **Round-history compression** keyed off chain length (`[budget]
+  compress_history`, `compress_after_rounds`, `compress_target_tokens`);
+  default flipped to `true`.
+- **Engine retry** layer for transient `claude` / `codex` failures
+  (`[engines.*] retry_max_attempts`, `retry_base_ms`, `retry_enabled`).
+- **Spec-level respec** on overlapping sibling abandons (`[budget]
+  respec_on_abandon`, `respec_min_overlap_score`).
+
 Known limitations in the current release:
 
-- Auto-decompose for stuck tasks ships in v0.3.0: parallel Claude+Codex
-  proposals + reviewer synthesis. Children inherit the parent's dependency
-  graph; downstream tasks wait for the full split.
 - `--sandbox` (container isolation) remains stubbed; per-task `git worktree`
   isolation continues to be the v0.x story.
 - MCP call failures are surfaced both in the per-round audit
   (`mcp-calls.json`) and inline in the reviewer prompt — the reviewer can
   distinguish "coder ignored a constraint" from "coder couldn't reach
   external context."
-- `aios serve` ships sequential-only in v0.5.0. The `[concurrency]
+- `aios serve` ships sequential-only. The `[concurrency]
   max_concurrent_issues` config knob exists but is clamped to 1 internally
   pending per-issue `.aios/` workspace isolation.
+- No empirical eval harness yet — quality claims rest on the structural
+  guarantees above (cross-model review, critique, respec, audit trail), not
+  on a benchmark.
 
 ## Contributing
 
