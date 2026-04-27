@@ -96,11 +96,13 @@ func launchShip(ctx context.Context, prompt string) (ShipResult, error) {
 	}
 	fmt.Fprintf(os.Stdout, "shipping %q…\n", prompt)
 	return ShipPrompt(ctx, ShipPromptInput{
-		Wd:      wd,
-		Prompt:  prompt,
-		Claude:  &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},
-		Codex:   &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
-		OnStage: func(name string) { fmt.Fprintf(os.Stdout, "  · %s …\n", name) },
+		Wd:                wd,
+		Prompt:            prompt,
+		Claude:            &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},
+		Codex:             &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
+		OnStage:           func(name string) { fmt.Fprintf(os.Stdout, "  · %s …\n", name) },
+		CritiqueEnabled:   cfg.Specgen.CritiqueOn(),
+		CritiqueThreshold: cfg.Specgen.Threshold(),
 	})
 }
 
@@ -115,11 +117,13 @@ func launchOneShot(ctx context.Context, prompt string) error {
 		return fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
 	}
 	return runOneShot(ctx, OneShotInput{
-		Wd:     wd,
-		Prompt: prompt,
-		Claude: &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},
-		Codex:  &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
-		Out:    os.Stdout,
+		Wd:                wd,
+		Prompt:            prompt,
+		Claude:            &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},
+		Codex:             &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
+		Out:               os.Stdout,
+		CritiqueEnabled:   cfg.Specgen.CritiqueOn(),
+		CritiqueThreshold: cfg.Specgen.Threshold(),
 	})
 }
 
@@ -134,11 +138,13 @@ func launchPrintMode(ctx context.Context, prompt string) error {
 		return fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
 	}
 	return runPrintMode(ctx, PrintModeInput{
-		Wd:     wd,
-		Prompt: prompt,
-		Claude: &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},
-		Codex:  &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
-		Out:    os.Stdout,
+		Wd:                wd,
+		Prompt:            prompt,
+		Claude:            &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},
+		Codex:             &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
+		Out:               os.Stdout,
+		CritiqueEnabled:   cfg.Specgen.CritiqueOn(),
+		CritiqueThreshold: cfg.Specgen.Threshold(),
 	})
 }
 
@@ -153,14 +159,16 @@ func launchRepl(ctx context.Context, resumeID string) error {
 		return fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
 	}
 	r := &Repl{
-		Wd:           wd,
-		In:           os.Stdin,
-		Out:          os.Stdout,
-		Claude:       &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},
-		Codex:        &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
-		ClaudeBinary: cfg.Engines.Claude.Binary,
-		CodexBinary:  cfg.Engines.Codex.Binary,
-		ResumeID:     resumeID,
+		Wd:                wd,
+		In:                os.Stdin,
+		Out:               os.Stdout,
+		Claude:            &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},
+		Codex:             &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
+		ClaudeBinary:      cfg.Engines.Claude.Binary,
+		CodexBinary:       cfg.Engines.Codex.Binary,
+		ResumeID:          resumeID,
+		CritiqueEnabled:   cfg.Specgen.CritiqueOn(),
+		CritiqueThreshold: cfg.Specgen.Threshold(),
 	}
 	return r.Run(ctx)
 }
