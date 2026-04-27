@@ -140,11 +140,13 @@ func inProcessShip(ctx context.Context, idea string) (AutopilotResult, error) {
 		Binary:     cfg.Engines.Claude.Binary,
 		ExtraArgs:  cfg.Engines.Claude.ExtraArgs,
 		TimeoutSec: cfg.Engines.Claude.TimeoutSec,
+		Retry:      retryPolicyFrom(cfg.Engines.Claude),
 	}
 	codex := &engine.CodexEngine{
 		Binary:     cfg.Engines.Codex.Binary,
 		ExtraArgs:  cfg.Engines.Codex.ExtraArgs,
 		TimeoutSec: cfg.Engines.Codex.TimeoutSec,
+		Retry:      retryPolicyFrom(cfg.Engines.Codex),
 	}
 	res, err := ShipPrompt(ctx, ShipPromptInput{
 		Wd: wd, Prompt: idea, Claude: claude, Codex: codex,

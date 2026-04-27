@@ -111,6 +111,11 @@ type RoundRecord struct {
 	// surfaced into the reviewer prompt so the reviewer can distinguish a
 	// coder mistake from an MCP outage.
 	McpCalls []engine.McpCall
+	// CoderAttempts records failed invocation attempts when the engine retry
+	// layer had to retry before succeeding. Empty on first-try success.
+	CoderAttempts []engine.Attempt
+	// ReviewerAttempts is the reviewer-side equivalent of CoderAttempts.
+	ReviewerAttempts []engine.Attempt
 }
 
 type Outcome struct {
@@ -186,6 +191,7 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 		}
 		r.CoderText = cres.Text
 		r.CoderRaw = cres.Raw
+		r.CoderAttempts = cres.Attempts
 		b.AddTokens(cres.UsageTokens)
 		r.UsageTokens += cres.UsageTokens
 
@@ -223,6 +229,7 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 			return nil, fmt.Errorf("reviewer invoke: %w", err)
 		}
 		r.ReviewerRaw = rres.Raw
+		r.ReviewerAttempts = rres.Attempts
 		b.AddTokens(rres.UsageTokens)
 		r.UsageTokens += rres.UsageTokens
 		var rev ReviewResult

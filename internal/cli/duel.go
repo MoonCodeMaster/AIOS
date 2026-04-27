@@ -85,8 +85,8 @@ func runDuel(ctx context.Context, task string, apply bool) error {
 		return err
 	}
 
-	claude := &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec}
-	codex := &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec}
+	claude := &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec, Retry: retryPolicyFrom(cfg.Engines.Claude)}
+	codex := &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec, Retry: retryPolicyFrom(cfg.Engines.Codex)}
 	// CRITICAL: the judge must be neither duellist. Both Claude and Codex are
 	// in the duel, so a third engine is required. We do not have one in v0,
 	// so we instead select whichever of the two has a *fresh prompt context*
@@ -141,9 +141,9 @@ func runDuel(ctx context.Context, task string, apply bool) error {
 	}
 
 	var (
-		resA, resB     duelResult
-		rawA, rawB     string
-		wg             sync.WaitGroup
+		resA, resB duelResult
+		rawA, rawB string
+		wg         sync.WaitGroup
 	)
 	wg.Add(2)
 	go func() {

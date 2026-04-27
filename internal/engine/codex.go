@@ -12,11 +12,22 @@ type CodexEngine struct {
 	Binary     string
 	ExtraArgs  []string
 	TimeoutSec int
+	Retry      RetryPolicy
 }
 
 func (c *CodexEngine) Name() string { return "codex" }
 
 func (c *CodexEngine) Invoke(ctx context.Context, req InvokeRequest) (*InvokeResponse, error) {
+	resp, attempts, err := WithRetry(ctx, c.Retry, func() (*InvokeResponse, error) {
+		return c.invoke(ctx, req)
+	})
+	if resp != nil {
+		resp.Attempts = attempts
+	}
+	return resp, err
+}
+
+func (c *CodexEngine) invoke(ctx context.Context, req InvokeRequest) (*InvokeResponse, error) {
 	args := buildCodexArgs(req, c.ExtraArgs)
 	cmd := exec.CommandContext(ctx, c.Binary, args...)
 	if req.Workdir != "" {
@@ -59,16 +70,16 @@ type codexSingleJSON struct {
 
 // codexEvent is one line of real Codex CLI NDJSON output.
 type codexEvent struct {
-	Type        string          `json:"type"`
-	Content     string          `json:"content"`
-	InputTokens int             `json:"input_tokens"`
-	OutputTokens int            `json:"output_tokens"`
-	Server      string          `json:"server"`
-	Tool        string          `json:"tool"`
-	Args        json.RawMessage `json:"args"`
-	Result      json.RawMessage `json:"result"`
-	ElapsedMs   int             `json:"elapsed_ms"`
-	Error       string          `json:"error"`
+	Type         string          `json:"type"`
+	Content      string          `json:"content"`
+	InputTokens  int             `json:"input_tokens"`
+	OutputTokens int             `json:"output_tokens"`
+	Server       string          `json:"server"`
+	Tool         string          `json:"tool"`
+	Args         json.RawMessage `json:"args"`
+	Result       json.RawMessage `json:"result"`
+	ElapsedMs    int             `json:"elapsed_ms"`
+	Error        string          `json:"error"`
 }
 
 // isNDJSON reports whether raw contains multiple top-level JSON objects separated

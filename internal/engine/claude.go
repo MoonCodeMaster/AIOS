@@ -12,11 +12,22 @@ type ClaudeEngine struct {
 	Binary     string
 	ExtraArgs  []string
 	TimeoutSec int
+	Retry      RetryPolicy
 }
 
 func (c *ClaudeEngine) Name() string { return "claude" }
 
 func (c *ClaudeEngine) Invoke(ctx context.Context, req InvokeRequest) (*InvokeResponse, error) {
+	resp, attempts, err := WithRetry(ctx, c.Retry, func() (*InvokeResponse, error) {
+		return c.invoke(ctx, req)
+	})
+	if resp != nil {
+		resp.Attempts = attempts
+	}
+	return resp, err
+}
+
+func (c *ClaudeEngine) invoke(ctx context.Context, req InvokeRequest) (*InvokeResponse, error) {
 	args := buildClaudeArgs(req, c.ExtraArgs)
 	cmd := exec.CommandContext(ctx, c.Binary, args...)
 	if req.Workdir != "" {
