@@ -96,6 +96,7 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 		} else {
 			out.Final = polishedText
 		}
+		runCritiqueRefine(ctx, &in, &out, survName)
 		persist(in.Recorder, out)
 		return out, nil
 	}
@@ -138,6 +139,7 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 	} else {
 		out.Final = polishedText
 	}
+	runCritiqueRefine(ctx, &in, &out, "claude")
 	persist(in.Recorder, out)
 	return out, nil
 }
@@ -160,7 +162,96 @@ func persist(rec *run.Recorder, out Output) {
 	if out.Final != "" {
 		_ = rec.WriteFile("specgen/final.md", []byte(out.Final))
 	}
+	if out.Score != nil {
+		_ = rec.WriteJSON("specgen/5-score.json", map[string]any{
+			"score":  out.Score,
+			"issues": out.CritiqueIssues,
+		})
+	}
 	_ = rec.WriteJSON("specgen/stages.json", out.Stages)
+}
+
+// runCritiqueRefine runs stages 5 (critique) and optionally 6 (refine) on the
+// polished spec. polishEngine is the name of the engine that ran stage 4 — the
+// critique runs on the OTHER engine to maintain the cross-model invariant.
+func runCritiqueRefine(ctx context.Context, in *Input, out *Output, polishEngine string) {
+	if !in.CritiqueEnabled {
+		return
+	}
+
+	// Pick the cross-model critique engine.
+	var critiqueEng engine.Engine
+	var critiqueName string
+	var refineEng engine.Engine
+	var refineName string
+	switch polishEngine {
+	case "claude":
+		critiqueEng, critiqueName = in.Codex, "codex"
+		refineEng, refineName = in.Claude, "claude"
+	case "codex":
+		critiqueEng, critiqueName = in.Claude, "claude"
+		refineEng, refineName = in.Codex, "codex"
+	default:
+		out.Warnings = append(out.Warnings, fmt.Sprintf("critique: unknown polish engine %q; skipping", polishEngine))
+		return
+	}
+
+	polishedSpec := out.Final
+
+	// Stage 5: critique.
+	critiquePrompt, err := prompts.Render("critique.tmpl", map[string]string{"Spec": polishedSpec})
+	if err != nil {
+		out.Warnings = append(out.Warnings, fmt.Sprintf("critique render: %v", err))
+		return
+	}
+	critiqueText, m5 := runStage(ctx, "critique", critiqueName, critiqueEng, critiquePrompt, in.OnStageStart, in.OnStageEnd)
+	out.Stages = append(out.Stages, m5)
+
+	// Persist raw critique output.
+	if in.Recorder != nil && critiqueText != "" {
+		_ = in.Recorder.WriteFile("specgen/5-critique.md", []byte(critiqueText))
+	}
+
+	if m5.Err != "" {
+		out.Warnings = append(out.Warnings, fmt.Sprintf("critique engine failed: %s", m5.Err))
+		return
+	}
+
+	score, issues, err := ParseCritiqueOutput(critiqueText)
+	if err != nil {
+		out.Warnings = append(out.Warnings, fmt.Sprintf("critique parse: %v", err))
+		return
+	}
+	score.Pass = score.Total >= in.CritiqueThreshold
+	out.Score = score
+	out.CritiqueIssues = issues
+
+	if score.Pass {
+		return
+	}
+
+	// Stage 6: refine (score below threshold).
+	refinePrompt, err := prompts.Render("refine.tmpl", map[string]any{
+		"Spec":   polishedSpec,
+		"Issues": issues,
+	})
+	if err != nil {
+		out.Warnings = append(out.Warnings, fmt.Sprintf("refine render: %v", err))
+		return
+	}
+	refinedText, m6 := runStage(ctx, "refine", refineName, refineEng, refinePrompt, in.OnStageStart, in.OnStageEnd)
+	out.Stages = append(out.Stages, m6)
+
+	if in.Recorder != nil && refinedText != "" {
+		_ = in.Recorder.WriteFile("specgen/6-refine.md", []byte(refinedText))
+	}
+
+	if m6.Err != "" {
+		out.Warnings = append(out.Warnings, fmt.Sprintf("refine engine failed: %s; keeping polished spec", m6.Err))
+		return
+	}
+	out.Final = refinedText
+	out.Refined = true
 }
 
 func runStage(ctx context.Context, name, engineName string, eng engine.Engine, prompt string,

@@ -34,6 +34,9 @@ type Repl struct {
 
 	ResumeID string // empty = use LatestSession; specific ID = LoadSession(<id>)
 
+	CritiqueEnabled   bool
+	CritiqueThreshold int
+
 	session *Session
 	outMu   sync.Mutex // guards Out against concurrent stage callbacks
 }
@@ -143,12 +146,14 @@ func (r *Repl) runTurn(ctx context.Context, msg string) error {
 		prior[i] = specgen.Turn{UserMessage: t.UserMessage, FinalSpec: t.SpecAfter}
 	}
 	in := specgen.Input{
-		UserRequest: msg,
-		PriorTurns:  prior,
-		CurrentSpec: currentSpec,
-		Claude:      r.Claude,
-		Codex:       r.Codex,
-		Recorder:    rec,
+		UserRequest:       msg,
+		PriorTurns:        prior,
+		CurrentSpec:       currentSpec,
+		Claude:            r.Claude,
+		Codex:             r.Codex,
+		Recorder:          rec,
+		CritiqueEnabled:   r.CritiqueEnabled,
+		CritiqueThreshold: r.CritiqueThreshold,
 		OnStageStart: func(name string) {
 			r.outMu.Lock()
 			fmt.Fprintf(r.Out, "  · %s …\n", name)

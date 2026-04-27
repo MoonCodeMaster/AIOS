@@ -17,11 +17,13 @@ import (
 // OneShotInput bundles the inputs to a non-interactive single-prompt
 // invocation of `aios "prompt"`. Engines are injectable for tests.
 type OneShotInput struct {
-	Wd     string
-	Prompt string
-	Claude engine.Engine
-	Codex  engine.Engine
-	Out    io.Writer
+	Wd                string
+	Prompt            string
+	Claude            engine.Engine
+	Codex             engine.Engine
+	Out               io.Writer
+	CritiqueEnabled   bool
+	CritiqueThreshold int
 }
 
 // runOneShot runs specgen on the prompt, writes the polished spec to
@@ -38,10 +40,12 @@ func runOneShot(ctx context.Context, in OneShotInput) error {
 	// so guard writes to in.Out with a mutex.
 	var outMu sync.Mutex
 	out, err := specgen.Generate(ctx, specgen.Input{
-		UserRequest: in.Prompt,
-		Claude:      in.Claude,
-		Codex:       in.Codex,
-		Recorder:    rec,
+		UserRequest:       in.Prompt,
+		Claude:            in.Claude,
+		Codex:             in.Codex,
+		Recorder:          rec,
+		CritiqueEnabled:   in.CritiqueEnabled,
+		CritiqueThreshold: in.CritiqueThreshold,
 		OnStageStart: func(name string) {
 			outMu.Lock()
 			defer outMu.Unlock()
@@ -67,11 +71,13 @@ func runOneShot(ctx context.Context, in OneShotInput) error {
 
 // PrintModeInput bundles the inputs for `aios -p "prompt"`.
 type PrintModeInput struct {
-	Wd     string
-	Prompt string
-	Claude engine.Engine
-	Codex  engine.Engine
-	Out    io.Writer
+	Wd                string
+	Prompt            string
+	Claude            engine.Engine
+	Codex             engine.Engine
+	Out               io.Writer
+	CritiqueEnabled   bool
+	CritiqueThreshold int
 }
 
 // runPrintMode runs specgen and writes ONLY the polished spec to Out.
@@ -85,10 +91,12 @@ func runPrintMode(ctx context.Context, in PrintModeInput) error {
 		return fmt.Errorf("open run dir: %w", err)
 	}
 	out, err := specgen.Generate(ctx, specgen.Input{
-		UserRequest: in.Prompt,
-		Claude:      in.Claude,
-		Codex:       in.Codex,
-		Recorder:    rec,
+		UserRequest:       in.Prompt,
+		Claude:            in.Claude,
+		Codex:             in.Codex,
+		Recorder:          rec,
+		CritiqueEnabled:   in.CritiqueEnabled,
+		CritiqueThreshold: in.CritiqueThreshold,
 	})
 	if err != nil {
 		return fmt.Errorf("specgen: %w", err)

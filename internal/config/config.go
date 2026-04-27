@@ -20,6 +20,33 @@ type Config struct {
 	Runtime       Runtime  `toml:"runtime"`
 	Parallel      Parallel `toml:"parallel"`
 	MCP           MCP      `toml:"mcp"`
+	Specgen       Specgen  `toml:"specgen"`
+}
+
+// Specgen controls the specgen pipeline behavior.
+type Specgen struct {
+	CritiqueEnabled   *bool `toml:"critique_enabled"`
+	CritiqueThreshold int   `toml:"critique_threshold"`
+}
+
+// CritiqueOn returns whether the critique stage is enabled. Default true.
+func (s Specgen) CritiqueOn() bool {
+	if s.CritiqueEnabled == nil {
+		return true
+	}
+	return *s.CritiqueEnabled
+}
+
+// Threshold returns the critique score threshold, clamped to 0–12.
+func (s Specgen) Threshold() int {
+	t := s.CritiqueThreshold
+	if t < 0 {
+		return 0
+	}
+	if t > 12 {
+		return 12
+	}
+	return t
 }
 
 type MCP struct {
@@ -302,5 +329,12 @@ func applyDefaults(c *Config) {
 	}
 	if c.Budget.CompressTargetTokens == 0 {
 		c.Budget.CompressTargetTokens = 50000
+	}
+	if c.Specgen.CritiqueEnabled == nil {
+		b := true
+		c.Specgen.CritiqueEnabled = &b
+	}
+	if c.Specgen.CritiqueThreshold == 0 {
+		c.Specgen.CritiqueThreshold = 9
 	}
 }

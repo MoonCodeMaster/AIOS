@@ -29,6 +29,10 @@ const v01Examples = `
 # retry_base_ms = 1000
 # retry_enabled = true
 
+# [specgen]
+# critique_enabled = true        # cross-model critique after polish (default true)
+# critique_threshold = 9         # score 0-12; refine fires below this (default 9)
+
 # [parallel]
 # max_parallel_tasks = 4         # number of concurrent task workers (default 4)
 # max_tokens_per_run = 1000000   # run-wide token cap; 0 disables (default 1,000,000)
