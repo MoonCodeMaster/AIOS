@@ -96,11 +96,13 @@ func launchShip(ctx context.Context, prompt string) (ShipResult, error) {
 	}
 	fmt.Fprintf(os.Stdout, "shipping %q…\n", prompt)
 	return ShipPrompt(ctx, ShipPromptInput{
-		Wd:      wd,
-		Prompt:  prompt,
-		Claude:  &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},
-		Codex:   &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
-		OnStage: func(name string) { fmt.Fprintf(os.Stdout, "  · %s …\n", name) },
+		Wd:                wd,
+		Prompt:            prompt,
+		Claude:            &engine.ClaudeEngine{Binary: cfg.Engines.Claude.Binary, ExtraArgs: cfg.Engines.Claude.ExtraArgs, TimeoutSec: cfg.Engines.Claude.TimeoutSec},
+		Codex:             &engine.CodexEngine{Binary: cfg.Engines.Codex.Binary, ExtraArgs: cfg.Engines.Codex.ExtraArgs, TimeoutSec: cfg.Engines.Codex.TimeoutSec},
+		OnStage:           func(name string) { fmt.Fprintf(os.Stdout, "  · %s …\n", name) },
+		CritiqueEnabled:   cfg.Specgen.CritiqueOn(),
+		CritiqueThreshold: cfg.Specgen.Threshold(),
 	})
 }
 

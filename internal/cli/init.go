@@ -17,7 +17,12 @@ import (
 )
 
 const v01Examples = `
-# --- v0.1 features (uncomment to enable) ---
+# --- v0.2 features (uncomment to override defaults) ---
+
+# [budget]
+# compress_history = true          # compress older rounds in coder prompt (default true)
+# respec_on_abandon = true         # regenerate spec when sibling tasks abandon with overlap (default true)
+# respec_min_overlap_score = 0.5   # Jaccard threshold for respec trigger (default 0.5)
 
 # [parallel]
 # max_parallel_tasks = 4         # number of concurrent task workers (default 4)

@@ -20,6 +20,33 @@ type Config struct {
 	Runtime       Runtime  `toml:"runtime"`
 	Parallel      Parallel `toml:"parallel"`
 	MCP           MCP      `toml:"mcp"`
+	Specgen       Specgen  `toml:"specgen"`
+}
+
+// Specgen controls the specgen pipeline behavior.
+type Specgen struct {
+	CritiqueEnabled   *bool `toml:"critique_enabled"`
+	CritiqueThreshold int   `toml:"critique_threshold"`
+}
+
+// CritiqueOn returns whether the critique stage is enabled. Default true.
+func (s Specgen) CritiqueOn() bool {
+	if s.CritiqueEnabled == nil {
+		return true
+	}
+	return *s.CritiqueEnabled
+}
+
+// Threshold returns the critique score threshold, clamped to 0-12.
+func (s Specgen) Threshold() int {
+	t := s.CritiqueThreshold
+	if t < 0 {
+		return 0
+	}
+	if t > 12 {
+		return 12
+	}
+	return t
 }
 
 type MCP struct {
@@ -75,6 +102,16 @@ type Budget struct {
 	// runaway decomposition is almost always a sign of a spec problem the
 	// model can't solve.
 	MaxDecomposeDepth int `toml:"max_decompose_depth"`
+	// CompressHistory enables round-history compression in the coder prompt.
+	// Default true in v0.2.0.
+	CompressHistory *bool `toml:"compress_history"`
+	// RespecOnAbandon enables spec-level stall escalation: when multiple
+	// sibling tasks abandon with overlapping issues, regenerate the spec
+	// and re-run once. Default true in v0.2.0.
+	RespecOnAbandon *bool `toml:"respec_on_abandon"`
+	// RespecMinOverlapScore is the minimum pairwise Jaccard overlap across
+	// abandoned task fingerprints to trigger a respec. Default 0.5.
+	RespecMinOverlapScore float64 `toml:"respec_min_overlap_score"`
 }
 
 type Verify struct {
@@ -172,6 +209,22 @@ func (b Budget) DecomposeDepthCap() int {
 	return b.MaxDecomposeDepth
 }
 
+// HistoryCompression returns whether round-history compression is enabled.
+func (b Budget) HistoryCompression() bool {
+	if b.CompressHistory == nil {
+		return true
+	}
+	return *b.CompressHistory
+}
+
+// RespecEnabled returns whether spec-level stall escalation is enabled.
+func (b Budget) RespecEnabled() bool {
+	if b.RespecOnAbandon == nil {
+		return true
+	}
+	return *b.RespecOnAbandon
+}
+
 var envRefRE = regexp.MustCompile(`\$\{env:([A-Z_][A-Z0-9_]*)\}`)
 
 func interpolateEnv(s string) string {
@@ -250,5 +303,23 @@ func applyDefaults(c *Config) {
 	}
 	if c.Runtime.WorktreeRoot == "" {
 		c.Runtime.WorktreeRoot = ".aios/worktrees"
+	}
+	if c.Budget.CompressHistory == nil {
+		b := true
+		c.Budget.CompressHistory = &b
+	}
+	if c.Budget.RespecOnAbandon == nil {
+		b := true
+		c.Budget.RespecOnAbandon = &b
+	}
+	if c.Budget.RespecMinOverlapScore == 0 {
+		c.Budget.RespecMinOverlapScore = 0.5
+	}
+	if c.Specgen.CritiqueEnabled == nil {
+		b := true
+		c.Specgen.CritiqueEnabled = &b
+	}
+	if c.Specgen.CritiqueThreshold == 0 {
+		c.Specgen.CritiqueThreshold = 9
 	}
 }

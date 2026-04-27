@@ -116,21 +116,25 @@ const (
 
 // ShipResult is the structured outcome of one ShipSpec or ShipPrompt run.
 type ShipResult struct {
-	Status     ShipStatus
-	PRURL      string
-	PRNumber   int
-	AuditTrail string
+	Status          ShipStatus
+	PRURL           string
+	PRNumber        int
+	AuditTrail      string
+	RespecAttempted bool
+	RespecOutcome   string
 }
 
 // ShipPromptInput bundles the inputs to ShipPrompt. Engines and the
 // (optional) ShipSpecFn override are injectable for tests.
 type ShipPromptInput struct {
-	Wd         string
-	Prompt     string
-	Claude     engine.Engine
-	Codex      engine.Engine
-	ShipSpecFn func(ctx context.Context, wd string) (ShipResult, error) // nil = use real ShipSpec
-	OnStage    func(name string)                                        // optional progress callback for specgen stages
+	Wd                string
+	Prompt            string
+	Claude            engine.Engine
+	Codex             engine.Engine
+	ShipSpecFn        func(ctx context.Context, wd string) (ShipResult, error)
+	OnStage           func(name string)
+	CritiqueEnabled   bool
+	CritiqueThreshold int
 }
 
 // ShipPrompt runs specgen.Generate on the prompt, writes the polished
@@ -143,11 +147,13 @@ func ShipPrompt(ctx context.Context, in ShipPromptInput) (ShipResult, error) {
 		return ShipResult{}, fmt.Errorf("open run dir: %w", err)
 	}
 	out, err := specgen.Generate(ctx, specgen.Input{
-		UserRequest:  in.Prompt,
-		Claude:       in.Claude,
-		Codex:        in.Codex,
-		Recorder:     rec,
-		OnStageStart: in.OnStage,
+		UserRequest:       in.Prompt,
+		Claude:            in.Claude,
+		Codex:             in.Codex,
+		Recorder:          rec,
+		CritiqueEnabled:   in.CritiqueEnabled,
+		CritiqueThreshold: in.CritiqueThreshold,
+		OnStageStart:      in.OnStage,
 	})
 	if err != nil {
 		return ShipResult{}, fmt.Errorf("specgen: %w", err)
