@@ -296,6 +296,7 @@ func runMain(cmd *cobra.Command, args []string) error {
 				PrevChecks:    in.PrevChecks,
 				Issues:        in.Issues,
 				Escalated:     in.Escalated,
+				PriorBrief:    in.PriorBrief,
 			})
 			if err != nil {
 				return fmt.Sprintf("coder-revise render error: %v\nTask: %s",
@@ -332,6 +333,11 @@ func runMain(cmd *cobra.Command, args []string) error {
 			MaxWall:        time.Duration(cfg.Budget.MaxWallMinutesPerTask) * time.Minute,
 			StallThreshold: cfg.Budget.StallThreshold,
 			MaxEscalations: cfg.Budget.Escalations(),
+			Compress: orchestrator.CompressConfig{
+				Enabled:      cfg.Budget.HistoryCompression(),
+				AfterRounds:  cfg.Budget.CompressAfterRounds,
+				TargetTokens: cfg.Budget.CompressTargetTokens,
+			},
 		}
 
 		fmt.Printf("→ task %s (%s)\n", tk.ID, tk.Kind)
@@ -359,6 +365,9 @@ func runMain(cmd *cobra.Command, args []string) error {
 			_ = rec.WriteRoundFile(tk.ID, i+1, "reviewer-response.json", jb2)
 			if r.Escalated {
 				_ = rec.WriteRoundFile(tk.ID, i+1, "escalated", []byte("true\n"))
+			}
+			if r.CompressedPriorBrief != "" {
+				_ = rec.WriteRoundFile(tk.ID, i+1, "compressed-prior.txt", []byte(r.CompressedPriorBrief))
 			}
 		}
 

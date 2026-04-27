@@ -23,6 +23,11 @@ const v01Examples = `
 # max_parallel_tasks = 4         # number of concurrent task workers (default 4)
 # max_tokens_per_run = 1000000   # run-wide token cap; 0 disables (default 1,000,000)
 
+# [budget]
+# compress_history = false       # compress older rounds in coder prompt (default false)
+# compress_after_rounds = 2      # keep last N rounds verbatim (default 2)
+# compress_target_tokens = 50000 # token budget for compressed brief (default 50000)
+
 # [mcp.servers.github]
 # binary = "github-mcp-server"
 # args = ["stdio"]
