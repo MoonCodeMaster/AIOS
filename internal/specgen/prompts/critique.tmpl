@@ -1,0 +1,25 @@
+Score the following spec on four dimensions (0-3 each, 12 max).
+
+Dimensions:
+- completeness: does the spec cover all asks? Any TODOs or TBD?
+- testability: are acceptance criteria checkable? Are edge cases listed?
+- scope_coherence: is the spec internally consistent? Any contradictions?
+- constraint_clarity: are non-functional requirements (perf, security, compat) explicit?
+
+Output format (follow exactly):
+
+SCORE
+completeness: <0-3>
+testability: <0-3>
+scope_coherence: <0-3>
+constraint_clarity: <0-3>
+total: <sum>
+
+ISSUES
+- <dimension>: <concrete issue description>
+- <dimension>: <concrete issue description>
+
+If there are no issues, write "ISSUES" followed by nothing.
+
+=== Spec to critique ===
+{{.Spec}}
