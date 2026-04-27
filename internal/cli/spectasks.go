@@ -117,10 +117,12 @@ const (
 
 // ShipResult is the structured outcome of one ShipSpec or ShipPrompt run.
 type ShipResult struct {
-	Status     ShipStatus
-	PRURL      string
-	PRNumber   int
-	AuditTrail string
+	Status          ShipStatus
+	PRURL           string
+	PRNumber        int
+	AuditTrail      string
+	RespecAttempted bool
+	RespecOutcome   string
 }
 
 // ShipPromptInput bundles the inputs to ShipPrompt. Engines and the

@@ -37,7 +37,7 @@ func (s Specgen) CritiqueOn() bool {
 	return *s.CritiqueEnabled
 }
 
-// Threshold returns the critique score threshold, clamped to 0–12.
+// Threshold returns the critique score threshold, clamped to 0-12.
 func (s Specgen) Threshold() int {
 	t := s.CritiqueThreshold
 	if t < 0 {
@@ -107,7 +107,7 @@ type Budget struct {
 	MaxDecomposeDepth int `toml:"max_decompose_depth"`
 	// CompressHistory enables round-history compression in the coder prompt.
 	// When true and the round count exceeds CompressAfterRounds, older rounds
-	// are replaced with a structured brief. Default false in v0.1.3.
+	// are replaced with a structured brief. Default true in v0.2.0.
 	CompressHistory *bool `toml:"compress_history"`
 	// CompressAfterRounds is the number of most-recent rounds that stay
 	// verbatim in the coder prompt. Older rounds are compressed. Default 2.
@@ -116,6 +116,13 @@ type Budget struct {
 	// brief. The algorithmic compressor uses this to bound per-round word
 	// count. Default 50000.
 	CompressTargetTokens int `toml:"compress_target_tokens"`
+	// RespecOnAbandon enables spec-level stall escalation: when multiple
+	// sibling tasks abandon with overlapping issues, regenerate the spec
+	// and re-run once. Default true in v0.2.0.
+	RespecOnAbandon *bool `toml:"respec_on_abandon"`
+	// RespecMinOverlapScore is the minimum pairwise Jaccard overlap across
+	// abandoned task fingerprints to trigger a respec. Default 0.5.
+	RespecMinOverlapScore float64 `toml:"respec_min_overlap_score"`
 }
 
 type Verify struct {
@@ -216,9 +223,17 @@ func (b Budget) DecomposeDepthCap() int {
 // HistoryCompression returns whether round-history compression is enabled.
 func (b Budget) HistoryCompression() bool {
 	if b.CompressHistory == nil {
-		return false
+		return true
 	}
 	return *b.CompressHistory
+}
+
+// RespecEnabled returns whether spec-level stall escalation is enabled.
+func (b Budget) RespecEnabled() bool {
+	if b.RespecOnAbandon == nil {
+		return true
+	}
+	return *b.RespecOnAbandon
 }
 
 var envRefRE = regexp.MustCompile(`\$\{env:([A-Z_][A-Z0-9_]*)\}`)
@@ -321,7 +336,7 @@ func applyDefaults(c *Config) {
 		c.Runtime.WorktreeRoot = ".aios/worktrees"
 	}
 	if c.Budget.CompressHistory == nil {
-		b := false
+		b := true
 		c.Budget.CompressHistory = &b
 	}
 	if c.Budget.CompressAfterRounds == 0 {
@@ -329,6 +344,13 @@ func applyDefaults(c *Config) {
 	}
 	if c.Budget.CompressTargetTokens == 0 {
 		c.Budget.CompressTargetTokens = 50000
+	}
+	if c.Budget.RespecOnAbandon == nil {
+		b := true
+		c.Budget.RespecOnAbandon = &b
+	}
+	if c.Budget.RespecMinOverlapScore == 0 {
+		c.Budget.RespecMinOverlapScore = 0.5
 	}
 	if c.Specgen.CritiqueEnabled == nil {
 		b := true

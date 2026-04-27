@@ -20,7 +20,7 @@ type Input struct {
 	OnStageEnd   func(name string, err error)
 	// CritiqueEnabled gates stages 5 (critique) and 6 (conditional refine).
 	CritiqueEnabled bool
-	// CritiqueThreshold is the minimum score (0–12) to skip the refine stage.
+	// CritiqueThreshold is the minimum score (0-12) to skip the refine stage.
 	CritiqueThreshold int
 }
 
@@ -70,4 +70,20 @@ type StageMetric struct {
 	Err        string // empty = succeeded
 	Skipped    bool   // true if this stage did not run because of upstream failure
 	Fallback   string // non-empty if this stage took a fallback path
+}
+
+// RegenerateInput is the input for the Regenerate pipeline, which takes an
+// existing spec and failure feedback to produce a revised spec. It skips the
+// dual-draft stages and goes straight to a feedback-aware merge.
+type RegenerateInput struct {
+	OriginalSpec      string
+	Feedback          string
+	Claude            engine.Engine
+	Codex             engine.Engine
+	Recorder          *run.Recorder
+	PolishEngine      string // "claude" or "codex" — the engine that polished the original spec
+	CritiqueEnabled   bool
+	CritiqueThreshold int
+	OnStageStart      func(string)
+	OnStageEnd        func(string, error)
 }

@@ -17,7 +17,14 @@ import (
 )
 
 const v01Examples = `
-# --- v0.1 features (uncomment to enable) ---
+# --- v0.2 features (uncomment to override defaults) ---
+
+# [budget]
+# compress_history = true          # compress older rounds in coder prompt (default true)
+# compress_after_rounds = 2        # keep last N rounds verbatim (default 2)
+# compress_target_tokens = 50000   # token budget for compressed brief (default 50000)
+# respec_on_abandon = true         # regenerate spec when sibling tasks abandon with overlap (default true)
+# respec_min_overlap_score = 0.5   # Jaccard threshold for respec trigger (default 0.5)
 
 # [engines.claude]
 # retry_max_attempts = 3         # total attempts per invocation (default 3)
@@ -36,11 +43,6 @@ const v01Examples = `
 # [parallel]
 # max_parallel_tasks = 4         # number of concurrent task workers (default 4)
 # max_tokens_per_run = 1000000   # run-wide token cap; 0 disables (default 1,000,000)
-
-# [budget]
-# compress_history = false       # compress older rounds in coder prompt (default false)
-# compress_after_rounds = 2      # keep last N rounds verbatim (default 2)
-# compress_target_tokens = 50000 # token budget for compressed brief (default 50000)
 
 # [mcp.servers.github]
 # binary = "github-mcp-server"
