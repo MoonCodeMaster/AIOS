@@ -18,6 +18,10 @@ type Input struct {
 	// draft-claude and draft-codex stages, which run in parallel goroutines.
 	OnStageStart func(name string)
 	OnStageEnd   func(name string, err error)
+	// CritiqueEnabled gates stages 5 (critique) and 6 (conditional refine).
+	CritiqueEnabled bool
+	// CritiqueThreshold is the minimum score (0–12) to skip the refine stage.
+	CritiqueThreshold int
 }
 
 // Turn is one prior REPL exchange in the same session.
@@ -34,6 +38,27 @@ type Output struct {
 	Merged      string
 	Stages      []StageMetric
 	Warnings    []string // human-readable notes about partial failures
+	// Score is the parsed critique score. Nil when critique is disabled or
+	// the critique stage was skipped due to error.
+	Score          *SpecScore
+	CritiqueIssues []CritiqueIssue
+	Refined        bool
+}
+
+// SpecScore holds the four-dimension critique score.
+type SpecScore struct {
+	Completeness      int  `json:"completeness"`
+	Testability       int  `json:"testability"`
+	ScopeCoherence    int  `json:"scope_coherence"`
+	ConstraintClarity int  `json:"constraint_clarity"`
+	Total             int  `json:"total"`
+	Pass              bool `json:"pass"`
+}
+
+// CritiqueIssue is a single issue raised by the critique stage.
+type CritiqueIssue struct {
+	Dimension string `json:"dimension"`
+	Note      string `json:"note"`
 }
 
 // StageMetric is the audit record for one stage of the pipeline.
