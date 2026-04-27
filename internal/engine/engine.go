@@ -31,6 +31,7 @@ type InvokeResponse struct {
 	UsageTokens int
 	ExitCode    int
 	McpCalls    []McpCall
+	Attempts    []Attempt // non-nil when retries occurred; for audit trail
 }
 
 type ToolCall struct {
