@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MoonCodeMaster/AIOS/internal/cli/decompose"
@@ -25,6 +26,34 @@ import (
 	"github.com/MoonCodeMaster/AIOS/internal/worktree"
 	"github.com/spf13/cobra"
 )
+
+// taskOutcomeRecorder, when non-nil, is invoked by runMain's taskFn for every
+// task whose orchestrator state machine settles. ShipSpec installs this so it
+// can detect overlapping abandons across sibling tasks and decide whether to
+// regenerate the spec. Package-level because runMain is reached via Cobra and
+// has no convenient injection seam.
+var (
+	taskOutcomeRecorderMu sync.Mutex
+	taskOutcomeRecorder   func(taskID string, outcome *orchestrator.Outcome)
+)
+
+func setTaskOutcomeRecorder(f func(taskID string, outcome *orchestrator.Outcome)) {
+	taskOutcomeRecorderMu.Lock()
+	taskOutcomeRecorder = f
+	taskOutcomeRecorderMu.Unlock()
+}
+
+func recordTaskOutcome(taskID string, outcome *orchestrator.Outcome) {
+	if outcome == nil {
+		return
+	}
+	taskOutcomeRecorderMu.Lock()
+	f := taskOutcomeRecorder
+	taskOutcomeRecorderMu.Unlock()
+	if f != nil {
+		f(taskID, outcome)
+	}
+}
 
 func newRunCmd() *cobra.Command {
 	c := &cobra.Command{
@@ -344,6 +373,7 @@ func runMain(cmd *cobra.Command, args []string) error {
 
 		fmt.Printf("→ task %s (%s)\n", tk.ID, tk.Kind)
 		outcome, err := orchestrator.Run(ctx, tk, dep)
+		recordTaskOutcome(string(id), outcome)
 		if err != nil {
 			return blockedTask(id, orchestrator.CodeEngineInvokeFailed, err.Error()), nil
 		}
