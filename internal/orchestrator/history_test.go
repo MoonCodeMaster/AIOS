@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -175,4 +174,35 @@ func makeTestRounds(n int) []RoundRecord {
 	return rounds
 }
 
-var _ = errors.New // keep import stable
+func TestAlgorithmicBrief_TightBudgetTruncatesFiles(t *testing.T) {
+	r := RoundRecord{
+		N: 1,
+		Review: ReviewResult{
+			Criteria: []CriterionStatus{{ID: "c1", Status: "unmet"}},
+		},
+		Checks: []verify.CheckResult{{Name: "test_cmd", Status: verify.StatusPassed}},
+	}
+	for i := 0; i < 8; i++ {
+		r.Review.Issues = append(r.Review.Issues, ReviewIssue{
+			Severity: "blocking",
+			File:     fmt.Sprintf("pkg%d/handler.go", i),
+		})
+	}
+	rounds := []RoundRecord{r, r, r}
+
+	// targetTokens=300, 3 rounds → 300/5/3 = 20 words per round.
+	// maxFiles = (20/2)/5 = 2, so 8 files should be truncated.
+	tight := AlgorithmicBrief(rounds, 300)
+	if !strings.Contains(tight, "...") || !strings.Contains(tight, "more)") {
+		t.Error("tight budget should truncate file list")
+	}
+
+	// Default budget should NOT truncate 8 files (maxFiles stays 10).
+	wide := AlgorithmicBrief(rounds, 50000)
+	if strings.Contains(wide, "more)") {
+		t.Error("default budget should not truncate 8 files")
+	}
+	if tight == wide {
+		t.Error("tight and wide budgets should produce different output")
+	}
+}

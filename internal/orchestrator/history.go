@@ -79,7 +79,15 @@ func writeRoundSummary(b *strings.Builder, r RoundRecord, maxWords int) {
 	// Issue count + files
 	fmt.Fprintf(b, "reviewer raised %d issues", issueCount)
 	if len(files) > 0 {
-		const maxFiles = 10
+		maxFiles := 10
+		if maxWords > 0 {
+			if budget := (maxWords / 2) / 5; budget < maxFiles {
+				if budget < 1 {
+					budget = 1
+				}
+				maxFiles = budget
+			}
+		}
 		if len(files) > maxFiles {
 			shown := files[:maxFiles]
 			fmt.Fprintf(b, " in %s... (+%d more)", strings.Join(shown, ", "), len(files)-maxFiles)
