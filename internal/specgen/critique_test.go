@@ -2,7 +2,6 @@ package specgen
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -219,4 +218,40 @@ func TestCritique_CrossModel_ClaudePolishCodexCritique(t *testing.T) {
 	}
 }
 
-var _ = errors.New // keep import
+func TestCritique_CrossModel_CodexPolishClaudeCritique(t *testing.T) {
+	// Claude draft fails (FailOnCall=1), so Codex becomes the surviving
+	// engine and runs polish. Critique must then route to Claude.
+	claude := &engine.FailOnCallEngine{
+		Name_:      "claude",
+		FailOnCall: 1,
+		Script: []engine.InvokeResponse{
+			{},                          // placeholder for the failed call slot
+			{Text: highScoreCritique()}, // critique response
+		},
+	}
+	codex := &engine.FakeEngine{Name_: "codex", Script: []engine.InvokeResponse{
+		{Text: "DRAFT_B"},       // stage 2: codex draft
+		{Text: "POLISHED_BY_X"}, // stage 4: codex polish (single-draft fallback)
+	}}
+	out, err := Generate(context.Background(), Input{
+		Claude: claude, Codex: codex,
+		CritiqueEnabled: true, CritiqueThreshold: 9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Score == nil || out.Score.Total != 11 {
+		t.Errorf("Score.Total = %v, want 11", out.Score)
+	}
+	if out.Refined {
+		t.Error("Refined should be false on fast path")
+	}
+	// Claude should have received the critique call (call 2, after draft failed on call 1).
+	if len(claude.Received) < 2 {
+		t.Fatalf("claude calls = %d, want >= 2", len(claude.Received))
+	}
+	last := claude.Received[len(claude.Received)-1]
+	if !strings.Contains(last.Prompt, "Score the following spec") {
+		t.Error("critique prompt should have been sent to claude (cross-model from codex polish)")
+	}
+}
