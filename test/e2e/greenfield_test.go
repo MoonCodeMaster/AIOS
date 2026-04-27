@@ -38,11 +38,11 @@ func TestE2E_Greenfield(t *testing.T) {
 		t.Fatalf("aios init failed: %v\n%s", err, out)
 	}
 
-	cmd = exec.Command(aios, "new", "Build a CLI that reverses its argv, with unit tests")
+	cmd = exec.Command(aios, "Build a CLI that reverses its argv, with unit tests")
 	cmd.Dir = dir
-	cmd.Stdin = strings.NewReader("y\n")
+	// no stdin needed — one-shot spec mode does not prompt
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("aios new failed: %v\n%s", err, out)
+		t.Fatalf("aios spec failed: %v\n%s", err, out)
 	}
 
 	cmd = exec.Command(aios, "run")

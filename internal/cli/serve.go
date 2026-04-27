@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/MoonCodeMaster/AIOS/internal/config"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/MoonCodeMaster/AIOS/internal/githost"
 	"github.com/spf13/cobra"
 )
@@ -76,7 +77,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	runner := &ServeRunner{
 		Host: host, State: state, Config: cfg,
-		Autopilot: subprocessAutopilot,
+		Autopilot: inProcessShip,
 	}
 
 	doOne := func(ctx context.Context) error {
@@ -119,80 +120,51 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 }
 
-// subprocessAutopilot shells out to `aios autopilot "<idea>"` and parses the
-// resulting autopilot-summary.md from the latest .aios/runs/<id>/ directory.
-func subprocessAutopilot(ctx context.Context, idea string) (AutopilotResult, error) {
+// inProcessShip runs the new ship pipeline for one issue body. Replaces
+// the prior subprocess-out-to-`aios autopilot` path.
+//
+// Note: ShipPrompt internally creates its own run dir and parseLatestShipSummary
+// picks the newest by lex sort. Safe here because serve processes one issue at
+// a time; concurrent ShipPrompt calls in the same wd would race and need a
+// (beforeIDs, afterIDs) snapshot pattern inside ShipSpec.
+func inProcessShip(ctx context.Context, idea string) (AutopilotResult, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return AutopilotResult{}, err
 	}
-	runsDir := filepath.Join(wd, ".aios", "runs")
-	beforeIDs := snapshotRunIDs(runsDir)
-
-	cmd := exec.CommandContext(ctx, os.Args[0], "autopilot", idea)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	exitErr := cmd.Run()
-
-	afterIDs := snapshotRunIDs(runsDir)
-	newID := newestNew(beforeIDs, afterIDs)
-	if newID == "" {
-		return AutopilotResult{}, fmt.Errorf("autopilot ran but no new run dir under %s (exit: %v)", runsDir, exitErr)
-	}
-	summaryPath := filepath.Join(runsDir, newID, "autopilot-summary.md")
-	body, err := os.ReadFile(summaryPath)
+	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
 	if err != nil {
-		return AutopilotResult{}, fmt.Errorf("read autopilot-summary.md: %w", err)
+		return AutopilotResult{}, fmt.Errorf("load config: %w", err)
 	}
-	return parseAutopilotSummary(string(body))
+	claude := &engine.ClaudeEngine{
+		Binary:     cfg.Engines.Claude.Binary,
+		ExtraArgs:  cfg.Engines.Claude.ExtraArgs,
+		TimeoutSec: cfg.Engines.Claude.TimeoutSec,
+	}
+	codex := &engine.CodexEngine{
+		Binary:     cfg.Engines.Codex.Binary,
+		ExtraArgs:  cfg.Engines.Codex.ExtraArgs,
+		TimeoutSec: cfg.Engines.Codex.TimeoutSec,
+	}
+	res, err := ShipPrompt(ctx, ShipPromptInput{
+		Wd: wd, Prompt: idea, Claude: claude, Codex: codex,
+	})
+	return shipResultToAutopilot(res), err
 }
 
-func snapshotRunIDs(runsDir string) map[string]bool {
-	out := map[string]bool{}
-	entries, _ := os.ReadDir(runsDir)
-	for _, e := range entries {
-		if e.IsDir() {
-			out[e.Name()] = true
-		}
+// shipResultToAutopilot bridges the new ShipResult type to the existing
+// AutopilotResult/AutopilotStatus types still used by serve_runner.go.
+func shipResultToAutopilot(s ShipResult) AutopilotResult {
+	out := AutopilotResult{PRURL: s.PRURL, PRNumber: s.PRNumber, AuditTrail: s.AuditTrail}
+	switch s.Status {
+	case ShipMerged:
+		out.Status = AutopilotMerged
+	case ShipPRRed:
+		out.Status = AutopilotPRRed
+	case ShipAbandoned:
+		out.Status = AutopilotAbandoned
+	default:
+		out.Status = AutopilotUnknown
 	}
 	return out
-}
-
-func newestNew(before, after map[string]bool) string {
-	var newest string
-	for id := range after {
-		if before[id] {
-			continue
-		}
-		if id > newest {
-			newest = id
-		}
-	}
-	return newest
-}
-
-func parseAutopilotSummary(body string) (AutopilotResult, error) {
-	res := AutopilotResult{Status: AutopilotUnknown}
-	for _, ln := range strings.Split(body, "\n") {
-		ln = strings.TrimSpace(ln)
-		switch {
-		case strings.HasPrefix(ln, "PR: "):
-			res.PRURL = strings.TrimPrefix(ln, "PR: ")
-			parts := strings.Split(res.PRURL, "/")
-			if len(parts) > 0 {
-				_, _ = fmt.Sscanf(parts[len(parts)-1], "%d", &res.PRNumber)
-			}
-		case strings.HasPrefix(ln, "Merged: true"):
-			res.Status = AutopilotMerged
-		case strings.HasPrefix(ln, "Merged: false"):
-			res.Status = AutopilotPRRed
-		case strings.Contains(ln, "all tasks abandoned") || strings.Contains(ln, "Skipped: no converged tasks"):
-			res.Status = AutopilotAbandoned
-			res.AuditTrail = body
-		}
-	}
-	if res.Status == AutopilotUnknown {
-		return res, fmt.Errorf("autopilot-summary.md did not yield a recognised status:\n%s", body)
-	}
-	return res, nil
 }
