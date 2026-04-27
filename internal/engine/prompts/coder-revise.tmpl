@@ -31,6 +31,11 @@ You are the AIOS coder revising task {{.Task.ID}} ({{.Task.Kind}}), round {{.Rou
 {{- end}}
 
 Working directory: {{.Workdir}}
+{{- if .PriorBrief}}
+
+# Prior round history
+{{.PriorBrief}}
+{{- end}}
 
 # What you tried last round
 {{- if .PrevDiff}}

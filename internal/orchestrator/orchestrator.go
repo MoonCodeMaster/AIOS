@@ -50,6 +50,11 @@ type Deps struct {
 	// after stall detection fires before blocking. Zero disables escalation
 	// entirely (original pre-P0 behavior). A typical config value is 1.
 	MaxEscalations int
+
+	// Compress controls round-history compression. When enabled and the
+	// round count exceeds the threshold, older rounds are replaced with a
+	// structured brief in the coder prompt.
+	Compress CompressConfig
 }
 
 // CoderInput is the full per-round context handed to the RenderCoder callback.
@@ -70,6 +75,10 @@ type CoderInput struct {
 	// addressed; the model is explicitly told that further repetition of
 	// the same pattern will block the task.
 	Escalated bool
+	// PriorBrief is a compressed summary of rounds older than the last K,
+	// produced by the history compressor. Empty when compression is disabled
+	// or the round count is below the threshold.
+	PriorBrief string
 }
 
 type ReviewResult struct {
@@ -116,6 +125,12 @@ type RoundRecord struct {
 	CoderAttempts []engine.Attempt
 	// ReviewerAttempts is the reviewer-side equivalent of CoderAttempts.
 	ReviewerAttempts []engine.Attempt
+	// CompressedPriorBrief holds the compressed summary of older rounds,
+	// set only when history compression fires for this round's coder prompt.
+	CompressedPriorBrief string
+	// CompressionTokens is the LLM token cost of producing the brief (0
+	// when the algorithmic strategy was used).
+	CompressionTokens int
 }
 
 type Outcome struct {
@@ -168,6 +183,16 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 		r := RoundRecord{N: b.Rounds(), Escalated: nextEscalated}
 
 		// --- coding ---
+		// Compress older rounds into a brief when the chain is long enough.
+		var priorBrief string
+		if isRevision {
+			brief, compTokens, _ := CompressRounds(ctx, d.Compress, out.Rounds, d.Reviewer)
+			if brief != "" {
+				priorBrief = brief
+				r.CompressedPriorBrief = brief
+				r.CompressionTokens = compTokens
+			}
+		}
 		cp := d.RenderCoder(CoderInput{
 			Task:       task,
 			IsRevision: isRevision,
@@ -176,6 +201,7 @@ func Run(ctx context.Context, task *spec.Task, d *Deps) (*Outcome, error) {
 			PrevDiff:   prevDiff,
 			PrevChecks: prevChecks,
 			Escalated:  nextEscalated,
+			PriorBrief: priorBrief,
 		})
 		// Consumed this round — do not carry the flag into the next iteration
 		// unless the stall-detection branch below fires again.
@@ -413,6 +439,9 @@ func defaultCoderRender(in CoderInput) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Revise task %s (round %d).\n", in.Task.ID, in.Round)
 	fmt.Fprintf(&b, "Acceptance: %v\n", in.Task.Acceptance)
+	if in.PriorBrief != "" {
+		fmt.Fprintf(&b, "%s\n", in.PriorBrief)
+	}
 	if len(in.PrevChecks) > 0 {
 		fmt.Fprintf(&b, "Prior verify results:\n")
 		for _, c := range in.PrevChecks {

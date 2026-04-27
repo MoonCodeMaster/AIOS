@@ -78,6 +78,17 @@ type Budget struct {
 	// runaway decomposition is almost always a sign of a spec problem the
 	// model can't solve.
 	MaxDecomposeDepth int `toml:"max_decompose_depth"`
+	// CompressHistory enables round-history compression in the coder prompt.
+	// When true and the round count exceeds CompressAfterRounds, older rounds
+	// are replaced with a structured brief. Default false in v0.1.3.
+	CompressHistory *bool `toml:"compress_history"`
+	// CompressAfterRounds is the number of most-recent rounds that stay
+	// verbatim in the coder prompt. Older rounds are compressed. Default 2.
+	CompressAfterRounds int `toml:"compress_after_rounds"`
+	// CompressTargetTokens is the target token budget for the compressed
+	// brief. The algorithmic compressor uses this to bound per-round word
+	// count. Default 50000.
+	CompressTargetTokens int `toml:"compress_target_tokens"`
 }
 
 type Verify struct {
@@ -173,6 +184,14 @@ func (b Budget) DecomposeDepthCap() int {
 		return hardCap
 	}
 	return b.MaxDecomposeDepth
+}
+
+// HistoryCompression returns whether round-history compression is enabled.
+func (b Budget) HistoryCompression() bool {
+	if b.CompressHistory == nil {
+		return false
+	}
+	return *b.CompressHistory
 }
 
 var envRefRE = regexp.MustCompile(`\$\{env:([A-Z_][A-Z0-9_]*)\}`)
@@ -273,5 +292,15 @@ func applyDefaults(c *Config) {
 	}
 	if c.Runtime.WorktreeRoot == "" {
 		c.Runtime.WorktreeRoot = ".aios/worktrees"
+	}
+	if c.Budget.CompressHistory == nil {
+		b := false
+		c.Budget.CompressHistory = &b
+	}
+	if c.Budget.CompressAfterRounds == 0 {
+		c.Budget.CompressAfterRounds = 2
+	}
+	if c.Budget.CompressTargetTokens == 0 {
+		c.Budget.CompressTargetTokens = 50000
 	}
 }

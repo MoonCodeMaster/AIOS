@@ -55,6 +55,7 @@ type coderReviseData struct {
 	PrevChecks    []verify.CheckResult
 	Issues        []orchestrator.ReviewIssue
 	Escalated     bool
+	PriorBrief    string
 }
 
 // reviewerData is the shape consumed by reviewer.tmpl.
@@ -200,4 +201,3 @@ func similarTasks(all []*spec.Task, target *spec.Task) []similarTask {
 	}
 	return out
 }
-
