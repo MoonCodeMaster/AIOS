@@ -3,5 +3,14 @@
 .DS_Store
 Reference/
 
+# Local notes and archived planning docs
+docs/superpowers/
+
+# AIOS runtime state (generated when running aios on this repo)
 .aios/worktrees/
-.aios/runs/*/*/round-*/verify.json.tmp
+.aios/runs/
+.aios/sessions/
+.aios/tasks/
+.aios/abandoned/
+.aios/serve/
+.aios/project.md
