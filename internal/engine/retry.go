@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"regexp"
@@ -95,7 +96,7 @@ func classifyErr(err error) bool {
 		return false
 	}
 	// Context errors are never transient.
-	if ctx := context.Canceled; err == ctx || err == context.DeadlineExceeded {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
 

@@ -150,6 +150,8 @@ func TestClassifyErr(t *testing.T) {
 		// Context errors → permanent (propagate immediately)
 		{"context canceled", context.Canceled, false},
 		{"context deadline", context.DeadlineExceeded, false},
+		{"wrapped context canceled", fmt.Errorf("invoke: %w", context.Canceled), false},
+		{"wrapped deadline exceeded", fmt.Errorf("invoke: %w", context.DeadlineExceeded), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
