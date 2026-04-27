@@ -48,9 +48,12 @@ type Engines struct {
 }
 
 type EngineBinary struct {
-	Binary     string   `toml:"binary"`
-	ExtraArgs  []string `toml:"extra_args"`
-	TimeoutSec int      `toml:"timeout_sec"`
+	Binary           string   `toml:"binary"`
+	ExtraArgs        []string `toml:"extra_args"`
+	TimeoutSec       int      `toml:"timeout_sec"`
+	RetryMaxAttempts int      `toml:"retry_max_attempts"`
+	RetryBaseMs      int      `toml:"retry_base_ms"`
+	RetryEnabled     *bool    `toml:"retry_enabled"`
 }
 
 type Budget struct {
@@ -231,6 +234,26 @@ func applyDefaults(c *Config) {
 	}
 	if c.Engines.Codex.TimeoutSec == 0 {
 		c.Engines.Codex.TimeoutSec = 600
+	}
+	if c.Engines.Claude.RetryMaxAttempts == 0 {
+		c.Engines.Claude.RetryMaxAttempts = 3
+	}
+	if c.Engines.Claude.RetryBaseMs == 0 {
+		c.Engines.Claude.RetryBaseMs = 1000
+	}
+	if c.Engines.Claude.RetryEnabled == nil {
+		b := true
+		c.Engines.Claude.RetryEnabled = &b
+	}
+	if c.Engines.Codex.RetryMaxAttempts == 0 {
+		c.Engines.Codex.RetryMaxAttempts = 3
+	}
+	if c.Engines.Codex.RetryBaseMs == 0 {
+		c.Engines.Codex.RetryBaseMs = 1000
+	}
+	if c.Engines.Codex.RetryEnabled == nil {
+		b := true
+		c.Engines.Codex.RetryEnabled = &b
 	}
 	if c.Budget.MaxRoundsPerTask == 0 {
 		c.Budget.MaxRoundsPerTask = 5

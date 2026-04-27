@@ -19,6 +19,16 @@ import (
 const v01Examples = `
 # --- v0.1 features (uncomment to enable) ---
 
+# [engines.claude]
+# retry_max_attempts = 3         # total attempts per invocation (default 3)
+# retry_base_ms = 1000           # base backoff in ms before jitter (default 1000)
+# retry_enabled = true           # set false to disable retries (default true)
+
+# [engines.codex]
+# retry_max_attempts = 3
+# retry_base_ms = 1000
+# retry_enabled = true
+
 # [parallel]
 # max_parallel_tasks = 4         # number of concurrent task workers (default 4)
 # max_tokens_per_run = 1000000   # run-wide token cap; 0 disables (default 1,000,000)

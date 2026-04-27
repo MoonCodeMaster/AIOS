@@ -155,11 +155,13 @@ func runMain(cmd *cobra.Command, args []string) error {
 		Binary:     cfg.Engines.Claude.Binary,
 		ExtraArgs:  cfg.Engines.Claude.ExtraArgs,
 		TimeoutSec: cfg.Engines.Claude.TimeoutSec,
+		Retry:      retryPolicyFrom(cfg.Engines.Claude),
 	}
 	codexEng := &engine.CodexEngine{
 		Binary:     cfg.Engines.Codex.Binary,
 		ExtraArgs:  cfg.Engines.Codex.ExtraArgs,
 		TimeoutSec: cfg.Engines.Codex.TimeoutSec,
+		Retry:      retryPolicyFrom(cfg.Engines.Codex),
 	}
 	engMap := map[string]engine.Engine{"claude": claudeEng, "codex": codexEng}
 
@@ -359,6 +361,14 @@ func runMain(cmd *cobra.Command, args []string) error {
 			_ = rec.WriteRoundFile(tk.ID, i+1, "reviewer-response.json", jb2)
 			if r.Escalated {
 				_ = rec.WriteRoundFile(tk.ID, i+1, "escalated", []byte("true\n"))
+			}
+			if len(r.CoderAttempts) > 0 {
+				aj, _ := json.MarshalIndent(r.CoderAttempts, "", "  ")
+				_ = rec.WriteRoundFile(tk.ID, i+1, "coder.attempts.json", aj)
+			}
+			if len(r.ReviewerAttempts) > 0 {
+				aj, _ := json.MarshalIndent(r.ReviewerAttempts, "", "  ")
+				_ = rec.WriteRoundFile(tk.ID, i+1, "reviewer.attempts.json", aj)
 			}
 		}
 
@@ -995,4 +1005,23 @@ func writeChildTaskFile(tasksDir string, t *spec.Task) error {
 	fmt.Fprintln(&b, t.Body)
 	path := filepath.Join(tasksDir, t.ID+".md")
 	return os.WriteFile(path, []byte(b.String()), 0o644)
+}
+
+func retryPolicyFrom(eb config.EngineBinary) engine.RetryPolicy {
+	enabled := true
+	if eb.RetryEnabled != nil {
+		enabled = *eb.RetryEnabled
+	}
+	p := engine.RetryPolicy{
+		MaxAttempts: eb.RetryMaxAttempts,
+		BaseMs:      eb.RetryBaseMs,
+		Enabled:     enabled,
+	}
+	if p.MaxAttempts == 0 {
+		p.MaxAttempts = 3
+	}
+	if p.BaseMs == 0 {
+		p.BaseMs = 1000
+	}
+	return p
 }

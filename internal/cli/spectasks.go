@@ -85,6 +85,7 @@ func decomposeOnly(wd string) error {
 		Binary:     cfg.Engines.Codex.Binary,
 		ExtraArgs:  cfg.Engines.Codex.ExtraArgs,
 		TimeoutSec: cfg.Engines.Codex.TimeoutSec,
+		Retry:      retryPolicyFrom(cfg.Engines.Codex),
 	}
 	dPrompt, err := prompts.Render("decompose.tmpl", map[string]string{"Spec": string(specBody)})
 	if err != nil {
