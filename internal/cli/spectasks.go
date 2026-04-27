@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -226,7 +228,8 @@ func shipSpecAttempt(ctx context.Context, wd string, attempt int) (ShipResult, e
 				Enabled:    cfg.Budget.RespecEnabled(),
 				MinOverlap: cfg.Budget.RespecMinOverlapScore,
 			}
-			if shouldRespec(abandons, respecCfg, attempt) {
+			alreadyRespecedThisSpec := respecMarkedForCurrentSpec(wd)
+			if !alreadyRespecedThisSpec && shouldRespec(abandons, respecCfg, attempt) {
 				if applyErr := applyRespec(ctx, wd, cfg, abandons, ids); applyErr == nil {
 					res2, err2 := shipSpecAttempt(ctx, wd, attempt+1)
 					res2.RespecAttempted = true
@@ -251,19 +254,26 @@ func shipSpecAttempt(ctx context.Context, wd string, attempt int) (ShipResult, e
 	return res, parseErr
 }
 
-// collectAbandons drains the captured-outcome map for tasks whose orchestrator
-// state machine settled in StateBlocked. Sibling abandons drive the respec
-// trigger — non-blocked outcomes (converged, decomposed) are ignored.
+// collectAbandons drains the captured-outcome map for tasks that abandoned
+// from autopilot stall recovery — i.e., the reviewer kept rejecting and the
+// run gave up after escalation/decompose. Other block codes (budget caps,
+// engine errors, git failures, upstream cascades) are filtered out: their
+// reviewer-issue fingerprints are empty or noise, and respec'ing the spec
+// won't help the underlying mechanical failure.
 func collectAbandons(captured map[string]orchestrator.Outcome, mu *sync.Mutex) ([]orchestrator.Outcome, []string) {
 	mu.Lock()
 	defer mu.Unlock()
 	var abandons []orchestrator.Outcome
 	var ids []string
 	for id, oc := range captured {
-		if oc.Final == orchestrator.StateBlocked {
-			abandons = append(abandons, oc)
-			ids = append(ids, id)
+		if oc.Final != orchestrator.StateBlocked {
+			continue
 		}
+		if oc.BlockReason == nil || oc.BlockReason.Code != orchestrator.CodeAbandonedAutopilot {
+			continue
+		}
+		abandons = append(abandons, oc)
+		ids = append(ids, id)
 	}
 	return abandons, ids
 }
@@ -333,7 +343,63 @@ func applyRespec(ctx context.Context, wd string, cfg *config.Config, abandons []
 	if err := os.WriteFile(specPath, []byte(out.Final), 0o644); err != nil {
 		return fmt.Errorf("write new project.md: %w", err)
 	}
+	// Mark the regenerated spec as already-respeced so a process crash or
+	// daemon retry that re-enters ShipSpec on this same spec body cannot
+	// trigger a second respec. The marker is keyed by spec content hash:
+	// a user editing project.md changes the hash and respec becomes
+	// available again, which is the intended behavior.
+	if markErr := markRespecAttempted(wd); markErr != nil {
+		// Best-effort; surface in audit but don't fail the respec.
+		_ = os.WriteFile(filepath.Join(respecDir, "marker-error.txt"),
+			[]byte(markErr.Error()), 0o644)
+	}
 	return nil
+}
+
+// respecStateDir is the project-level location for cross-run respec state.
+func respecStateDir(wd string) string {
+	return filepath.Join(wd, ".aios", "state", "respec")
+}
+
+// specHashHex computes the sha256 hex of the current .aios/project.md, or
+// the empty string when the spec file is missing or unreadable.
+func specHashHex(wd string) string {
+	body, err := os.ReadFile(filepath.Join(wd, ".aios", "project.md"))
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
+// markRespecAttempted records that the current spec has already been
+// regenerated once. The marker file's name is the spec's sha256 hex so the
+// gate is per-spec-content rather than per-project.
+func markRespecAttempted(wd string) error {
+	hash := specHashHex(wd)
+	if hash == "" {
+		return fmt.Errorf("hash project.md: empty")
+	}
+	dir := respecStateDir(wd)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir respec state: %w", err)
+	}
+	path := filepath.Join(dir, hash+".attempted")
+	body := fmt.Sprintf("respec applied at %s\n", time.Now().UTC().Format(time.RFC3339))
+	return os.WriteFile(path, []byte(body), 0o644)
+}
+
+// respecMarkedForCurrentSpec returns true when the current project.md has
+// already been respeced once. Defends against the daemon-restart scenario
+// where a fresh ShipSpec call would otherwise re-arm respec on the
+// regenerated spec.
+func respecMarkedForCurrentSpec(wd string) bool {
+	hash := specHashHex(wd)
+	if hash == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(respecStateDir(wd), hash+".attempted"))
+	return err == nil
 }
 
 // stashTasks moves every .md file from tasksDir into oldTasksDir, leaving

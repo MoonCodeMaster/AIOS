@@ -76,11 +76,18 @@ func TestLatestRunDir_NoRunsErrors(t *testing.T) {
 	}
 }
 
-func TestCollectAbandons_FiltersToBlocked(t *testing.T) {
+func TestCollectAbandons_FiltersToStallAbandons(t *testing.T) {
+	abandonReason := &orchestrator.BlockReason{Code: orchestrator.CodeAbandonedAutopilot}
+	budgetReason := &orchestrator.BlockReason{Code: orchestrator.CodeMaxRoundsExceeded}
 	captured := map[string]orchestrator.Outcome{
-		"a": {Final: orchestrator.StateBlocked, Rounds: []orchestrator.RoundRecord{{N: 1}}},
+		"a": {Final: orchestrator.StateBlocked, BlockReason: abandonReason, Rounds: []orchestrator.RoundRecord{{N: 1}}},
 		"b": {Final: orchestrator.StateConverged},
-		"c": {Final: orchestrator.StateBlocked},
+		"c": {Final: orchestrator.StateBlocked, BlockReason: abandonReason},
+		// Budget-exhausted block: same StateBlocked, but should NOT trigger
+		// respec because the spec is fine; the run just ran out of rounds.
+		"d": {Final: orchestrator.StateBlocked, BlockReason: budgetReason},
+		// Block with no reason — defensive guard: skip rather than panic.
+		"e": {Final: orchestrator.StateBlocked},
 	}
 	abandons, ids := collectAbandons(captured, &sync.Mutex{})
 	if len(abandons) != 2 {
@@ -111,6 +118,42 @@ func TestRecordTaskOutcome_NilOutcomeNoop(t *testing.T) {
 	recordTaskOutcome("x", nil)
 	if called {
 		t.Error("recorder should not fire on nil outcome")
+	}
+}
+
+func TestRespecMarker_PerSpecHash(t *testing.T) {
+	wd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(wd, ".aios"), 0o755); err != nil {
+		t.Fatalf("mkdir .aios: %v", err)
+	}
+	specPath := filepath.Join(wd, ".aios", "project.md")
+	if err := os.WriteFile(specPath, []byte("v1 spec body"), 0o644); err != nil {
+		t.Fatalf("write spec v1: %v", err)
+	}
+
+	// Fresh: no marker yet.
+	if respecMarkedForCurrentSpec(wd) {
+		t.Fatal("fresh project should not be marked")
+	}
+
+	if err := markRespecAttempted(wd); err != nil {
+		t.Fatalf("markRespecAttempted: %v", err)
+	}
+
+	// Same spec body → same hash → marked.
+	if !respecMarkedForCurrentSpec(wd) {
+		t.Error("after markRespecAttempted, current spec should be marked")
+	}
+
+	// User edits the spec → different hash → marker no longer applies and
+	// respec becomes available again. This is the desired behavior: a fresh
+	// user-initiated spec edit is a meaningful signal that the prior respec
+	// outcome should not gate the new run.
+	if err := os.WriteFile(specPath, []byte("v2 spec body — user edited"), 0o644); err != nil {
+		t.Fatalf("write spec v2: %v", err)
+	}
+	if respecMarkedForCurrentSpec(wd) {
+		t.Error("after spec edit, marker should no longer apply (new hash)")
 	}
 }
 

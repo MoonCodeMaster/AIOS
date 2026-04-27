@@ -26,7 +26,7 @@ type Config struct {
 // Specgen controls the specgen pipeline behavior.
 type Specgen struct {
 	CritiqueEnabled   *bool `toml:"critique_enabled"`
-	CritiqueThreshold int   `toml:"critique_threshold"`
+	CritiqueThreshold *int  `toml:"critique_threshold"`
 }
 
 // CritiqueOn returns whether the critique stage is enabled. Default true.
@@ -37,9 +37,14 @@ func (s Specgen) CritiqueOn() bool {
 	return *s.CritiqueEnabled
 }
 
-// Threshold returns the critique score threshold, clamped to 0-12.
+// Threshold returns the critique score threshold, clamped to 0-12. A nil
+// pointer (field absent from TOML) returns the default of 9; an explicit
+// zero is honored — set critique_threshold = 0 to skip refine.
 func (s Specgen) Threshold() int {
-	t := s.CritiqueThreshold
+	if s.CritiqueThreshold == nil {
+		return 9
+	}
+	t := *s.CritiqueThreshold
 	if t < 0 {
 		return 0
 	}
@@ -356,7 +361,6 @@ func applyDefaults(c *Config) {
 		b := true
 		c.Specgen.CritiqueEnabled = &b
 	}
-	if c.Specgen.CritiqueThreshold == 0 {
-		c.Specgen.CritiqueThreshold = 9
-	}
+	// CritiqueThreshold default is applied lazily by Specgen.Threshold()
+	// so a user-set zero (disable refine) is not silently overwritten.
 }

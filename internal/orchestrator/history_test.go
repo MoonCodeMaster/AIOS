@@ -85,6 +85,21 @@ func TestAlgorithmicBrief_FileListTruncation(t *testing.T) {
 	}
 }
 
+func TestAlgorithmicBrief_PreservesBlockingNote(t *testing.T) {
+	// Regression: the algorithmic compressor used to drop reviewer note
+	// text entirely, leaving the coder unable to learn from prior rounds.
+	// The canonical fixture's blocking note "missing nil check" must
+	// survive compression.
+	rounds := makeTestRounds(3)
+	brief := AlgorithmicBrief(rounds, 50000)
+	if !strings.Contains(brief, "missing nil check") {
+		t.Errorf("brief should preserve blocking-issue note text; got:\n%s", brief)
+	}
+	if !strings.Contains(brief, "blocking notes:") {
+		t.Errorf("brief should label blocking notes; got:\n%s", brief)
+	}
+}
+
 func TestLLMBrief_Success(t *testing.T) {
 	fakeReviewer := &engine.FakeEngine{
 		Name_: "codex",

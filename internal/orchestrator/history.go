@@ -121,6 +121,35 @@ func writeRoundSummary(b *strings.Builder, r RoundRecord, maxWords int) {
 	}
 	b.WriteString("; ")
 
+	// Blocking-issue notes — without these the coder forgets *what* the
+	// reviewer rejected and tends to repeat the same mistake. Budget a
+	// quarter of the per-round word cap to a few of the worst notes; rely
+	// on the deterministic ordering of r.Review.Issues for stability.
+	noteBudget := maxWords / 4
+	if noteBudget < 8 {
+		noteBudget = 8
+	}
+	const maxNotes = 3
+	noteCount := 0
+	for _, iss := range r.Review.Issues {
+		if iss.Severity != "blocking" || strings.TrimSpace(iss.Note) == "" {
+			continue
+		}
+		if noteCount == 0 {
+			b.WriteString("blocking notes: ")
+		} else {
+			b.WriteString(" | ")
+		}
+		b.WriteString(truncateWords(iss.Note, noteBudget))
+		noteCount++
+		if noteCount >= maxNotes {
+			break
+		}
+	}
+	if noteCount > 0 {
+		b.WriteString("; ")
+	}
+
 	// Verify status
 	if verify.AllGreen(r.Checks) {
 		b.WriteString("verify green.")
@@ -137,6 +166,19 @@ func writeRoundSummary(b *strings.Builder, r RoundRecord, maxWords int) {
 			b.WriteString("verify red.")
 		}
 	}
+}
+
+// truncateWords returns the first n whitespace-separated words of s, with an
+// ellipsis appended when truncation occurred. n <= 0 returns s unchanged.
+func truncateWords(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+	fields := strings.Fields(s)
+	if len(fields) <= n {
+		return strings.Join(fields, " ")
+	}
+	return strings.Join(fields[:n], " ") + "…"
 }
 
 // issueFiles extracts unique file paths from review issues, sorted for

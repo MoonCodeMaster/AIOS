@@ -137,7 +137,9 @@ func TestClassifyErr(t *testing.T) {
 		{"EOF", fmt.Errorf("exec: exit 1 (stderr: unexpected EOF)"), true},
 		{"timeout", fmt.Errorf("exec: exit 1 (stderr: timeout waiting for response)"), true},
 		{"empty stdout crash", fmt.Errorf("exec: exit 1 (stderr: )"), true},
-		{"json parse on non-empty", fmt.Errorf("claude output parse: invalid character"), true},
+		// Parse failures are permanent: the model already responded and
+		// burned tokens; retrying would double-bill without recovery.
+		{"json parse on non-empty", fmt.Errorf("claude output parse: invalid character"), false},
 		// Permanent patterns
 		{"auth error", fmt.Errorf("exec: exit 1 (stderr: auth token expired)"), false},
 		{"forbidden", fmt.Errorf("exec: exit 1 (stderr: forbidden)"), false},

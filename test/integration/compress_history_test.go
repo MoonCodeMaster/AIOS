@@ -74,10 +74,12 @@ func TestCompressHistory_SixRoundTask(t *testing.T) {
 	if !strings.Contains(r4.CoderPrompt, "Prior rounds (compressed):") {
 		t.Error("round 4 coder prompt should contain compressed brief")
 	}
-	// Round 1's raw issue text should NOT appear in round 4's coder prompt
-	// (it's compressed away).
-	if strings.Contains(r4.CoderPrompt, "bug in round 1") {
-		t.Error("round 4 coder prompt should not contain round-1 raw issue text")
+	// Round 1's blocking-issue note SHOULD appear in round 4's coder prompt:
+	// without it, the coder forgets what the reviewer rejected and tends to
+	// repeat the same mistake. The full per-round prose is gone (replaced
+	// by a compressed line), but the note text itself survives.
+	if !strings.Contains(r4.CoderPrompt, "bug in round 1") {
+		t.Error("round 4 coder prompt should preserve round-1 blocking-issue note text")
 	}
 
 	// Rounds 1-2 should NOT have compression (below threshold).

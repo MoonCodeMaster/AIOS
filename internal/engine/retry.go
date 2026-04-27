@@ -107,10 +107,10 @@ func classifyErr(err error) bool {
 		return true
 	}
 
-	// JSON parse failure = CLI partially wrote output.
-	if strings.Contains(msg, "output parse:") {
-		return true
-	}
+	// Output-parse failures are NOT retried: the underlying call already
+	// reached the model and burned tokens; retrying double-bills without
+	// changing the upstream behavior. A truncated/garbled response is a
+	// permanent failure that must surface to the operator.
 
 	// Permanent patterns take priority over transient.
 	if permanentPatterns.MatchString(msg) {

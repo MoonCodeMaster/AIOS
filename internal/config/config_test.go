@@ -205,3 +205,37 @@ func TestBudget_DecomposeDepthCap_HardCapAt3(t *testing.T) {
 		t.Errorf("DecomposeDepthCap with 99 = %d, want hard cap 3", got)
 	}
 }
+
+func TestSpecgen_Threshold_DefaultWhenAbsent(t *testing.T) {
+	var s Specgen
+	if got := s.Threshold(); got != 9 {
+		t.Errorf("nil threshold = %d, want default 9", got)
+	}
+}
+
+func TestSpecgen_Threshold_ExplicitZeroHonored(t *testing.T) {
+	// Regression: a previous version stored Threshold as a plain int and
+	// applyDefaults silently overwrote 0 with 9, making it impossible to
+	// disable refine via critique_threshold = 0 in TOML.
+	zero := 0
+	s := Specgen{CritiqueThreshold: &zero}
+	if got := s.Threshold(); got != 0 {
+		t.Errorf("explicit 0 threshold returned %d, want 0", got)
+	}
+}
+
+func TestSpecgen_Threshold_ClampsHigh(t *testing.T) {
+	v := 99
+	s := Specgen{CritiqueThreshold: &v}
+	if got := s.Threshold(); got != 12 {
+		t.Errorf("threshold 99 = %d, want hard cap 12", got)
+	}
+}
+
+func TestSpecgen_Threshold_ClampsNegative(t *testing.T) {
+	v := -5
+	s := Specgen{CritiqueThreshold: &v}
+	if got := s.Threshold(); got != 0 {
+		t.Errorf("threshold -5 = %d, want 0", got)
+	}
+}
