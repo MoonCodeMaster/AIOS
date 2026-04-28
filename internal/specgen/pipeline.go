@@ -43,11 +43,11 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 	claudeCh := make(chan draftResult, 1)
 	codexCh := make(chan draftResult, 1)
 	go func() {
-		text, m := runStage(ctx, "draft-claude", "claude", in.Claude, draftPrompt, in.OnStageStart, in.OnStageEnd)
+		text, m := runStage(ctx, "draft-claude", "claude", in.Claude, draftPrompt, in.OnStageStart, in.OnStageEnd, in.OnStageProgress)
 		claudeCh <- draftResult{text, m}
 	}()
 	go func() {
-		text, m := runStage(ctx, "draft-codex", "codex", in.Codex, draftPrompt, in.OnStageStart, in.OnStageEnd)
+		text, m := runStage(ctx, "draft-codex", "codex", in.Codex, draftPrompt, in.OnStageStart, in.OnStageEnd, in.OnStageProgress)
 		codexCh <- draftResult{text, m}
 	}()
 	c := <-claudeCh
@@ -88,7 +88,7 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 		if err != nil {
 			return out, fmt.Errorf("render polish prompt: %w", err)
 		}
-		polishedText, m4 := runStage(ctx, "polish", survName, survEngine, polishPrompt, in.OnStageStart, in.OnStageEnd)
+		polishedText, m4 := runStage(ctx, "polish", survName, survEngine, polishPrompt, in.OnStageStart, in.OnStageEnd, in.OnStageProgress)
 		out.Stages = append(out.Stages, m4)
 		if m4.Err != "" {
 			out.Warnings = append(out.Warnings, fmt.Sprintf("Polish step failed; spec is the surviving draft. (%s)", m4.Err))
@@ -109,7 +109,7 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 	if err != nil {
 		return out, fmt.Errorf("render merge prompt: %w", err)
 	}
-	mergedText, m3 := runStage(ctx, "merge", "codex", in.Codex, mergePrompt, in.OnStageStart, in.OnStageEnd)
+	mergedText, m3 := runStage(ctx, "merge", "codex", in.Codex, mergePrompt, in.OnStageStart, in.OnStageEnd, in.OnStageProgress)
 	out.Stages = append(out.Stages, m3)
 	if m3.Err != "" {
 		out.Warnings = append(out.Warnings,
@@ -130,7 +130,7 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 	if err != nil {
 		return out, fmt.Errorf("render polish prompt: %w", err)
 	}
-	polishedText, m4 := runStage(ctx, "polish", "claude", in.Claude, polishPrompt, in.OnStageStart, in.OnStageEnd)
+	polishedText, m4 := runStage(ctx, "polish", "claude", in.Claude, polishPrompt, in.OnStageStart, in.OnStageEnd, in.OnStageProgress)
 	out.Stages = append(out.Stages, m4)
 	if m4.Err != "" {
 		out.Warnings = append(out.Warnings,
@@ -204,7 +204,7 @@ func runCritiqueRefine(ctx context.Context, in *Input, out *Output, polishEngine
 		out.Warnings = append(out.Warnings, fmt.Sprintf("critique render: %v", err))
 		return
 	}
-	critiqueText, m5 := runStage(ctx, "critique", critiqueName, critiqueEng, critiquePrompt, in.OnStageStart, in.OnStageEnd)
+	critiqueText, m5 := runStage(ctx, "critique", critiqueName, critiqueEng, critiquePrompt, in.OnStageStart, in.OnStageEnd, in.OnStageProgress)
 	out.Stages = append(out.Stages, m5)
 
 	// Persist raw critique output.
@@ -239,7 +239,7 @@ func runCritiqueRefine(ctx context.Context, in *Input, out *Output, polishEngine
 		out.Warnings = append(out.Warnings, fmt.Sprintf("refine render: %v", err))
 		return
 	}
-	refinedText, m6 := runStage(ctx, "refine", refineName, refineEng, refinePrompt, in.OnStageStart, in.OnStageEnd)
+	refinedText, m6 := runStage(ctx, "refine", refineName, refineEng, refinePrompt, in.OnStageStart, in.OnStageEnd, in.OnStageProgress)
 	out.Stages = append(out.Stages, m6)
 
 	if in.Recorder != nil && refinedText != "" {
@@ -254,13 +254,35 @@ func runCritiqueRefine(ctx context.Context, in *Input, out *Output, polishEngine
 	out.Refined = true
 }
 
+// runStage runs one engine call with start/end/progress callbacks.
+// onProgress (when non-nil) fires at ~1s intervals while the engine call is
+// in flight, so a TTY UI can redraw an elapsed-time line. Safe for concurrent
+// stages — callbacks may fire from multiple goroutines simultaneously.
 func runStage(ctx context.Context, name, engineName string, eng engine.Engine, prompt string,
-	onStart func(string), onEnd func(string, error)) (string, StageMetric) {
+	onStart func(string), onEnd func(string, error), onProgress func(string, time.Duration)) (string, StageMetric) {
 	if onStart != nil {
 		onStart(name)
 	}
 	t0 := time.Now()
+
+	done := make(chan struct{})
+	if onProgress != nil {
+		go func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					onProgress(name, time.Since(t0))
+				}
+			}
+		}()
+	}
+
 	resp, err := eng.Invoke(ctx, engine.InvokeRequest{Role: engine.RoleCoder, Prompt: prompt})
+	close(done)
 	if onEnd != nil {
 		onEnd(name, err)
 	}
@@ -337,7 +359,7 @@ func Regenerate(ctx context.Context, in RegenerateInput) (Output, error) {
 	if err != nil {
 		return out, fmt.Errorf("render respec-feedback: %w", err)
 	}
-	fbText, m1 := runStage(ctx, "respec-feedback", feedbackName, feedbackEng, fbPrompt, in.OnStageStart, in.OnStageEnd)
+	fbText, m1 := runStage(ctx, "respec-feedback", feedbackName, feedbackEng, fbPrompt, in.OnStageStart, in.OnStageEnd, in.OnStageProgress)
 	out.Stages = append(out.Stages, m1)
 	if m1.Err != "" {
 		return out, fmt.Errorf("respec feedback draft: %s", m1.Err)
@@ -351,7 +373,7 @@ func Regenerate(ctx context.Context, in RegenerateInput) (Output, error) {
 	if err != nil {
 		return out, fmt.Errorf("render merge: %w", err)
 	}
-	mergedText, m2 := runStage(ctx, "respec-merge", feedbackName, feedbackEng, mergePrompt, in.OnStageStart, in.OnStageEnd)
+	mergedText, m2 := runStage(ctx, "respec-merge", feedbackName, feedbackEng, mergePrompt, in.OnStageStart, in.OnStageEnd, in.OnStageProgress)
 	out.Stages = append(out.Stages, m2)
 	if m2.Err != "" {
 		return out, fmt.Errorf("respec merge: %s", m2.Err)
@@ -363,7 +385,7 @@ func Regenerate(ctx context.Context, in RegenerateInput) (Output, error) {
 	if err != nil {
 		return out, fmt.Errorf("render polish: %w", err)
 	}
-	polishedText, m3 := runStage(ctx, "respec-polish", polishName, polishEng, polishPrompt, in.OnStageStart, in.OnStageEnd)
+	polishedText, m3 := runStage(ctx, "respec-polish", polishName, polishEng, polishPrompt, in.OnStageStart, in.OnStageEnd, in.OnStageProgress)
 	out.Stages = append(out.Stages, m3)
 	if m3.Err != "" {
 		out.Warnings = append(out.Warnings, fmt.Sprintf("respec polish failed: %s; using merged version", m3.Err))
@@ -377,7 +399,7 @@ func Regenerate(ctx context.Context, in RegenerateInput) (Output, error) {
 		// Critique engine = NOT polish engine (same cross-model rule as M3).
 		critiquePrompt, err := prompts.Render("critique.tmpl", map[string]string{"Spec": out.Final})
 		if err == nil {
-			critiqueText, m4 := runStage(ctx, "respec-critique", feedbackName, feedbackEng, critiquePrompt, in.OnStageStart, in.OnStageEnd)
+			critiqueText, m4 := runStage(ctx, "respec-critique", feedbackName, feedbackEng, critiquePrompt, in.OnStageStart, in.OnStageEnd, in.OnStageProgress)
 			out.Stages = append(out.Stages, m4)
 			if m4.Err == "" {
 				score, issues, perr := ParseCritiqueOutput(critiqueText)

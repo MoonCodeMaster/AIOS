@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
@@ -38,7 +37,6 @@ type Repl struct {
 	CritiqueThreshold int
 
 	session *Session
-	outMu   sync.Mutex // guards Out against concurrent stage callbacks
 }
 
 // Run executes the REPL turn loop until /exit, EOF, or /ship.
@@ -62,8 +60,13 @@ func (r *Repl) Run(ctx context.Context) error {
 	scanner := bufio.NewScanner(r.In)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // long pasted prompts
 
-	fmt.Fprintln(r.Out, `aios — type a requirement and press Enter. End a line with "\" or wrap in """…""" for multi-line. /help for commands.`)
+	fmt.Fprintln(r.Out, `aios — type a requirement and press Enter. End a line with "\" or wrap in """…""" for multi-line. Ctrl+C or /exit to quit. /help for commands.`)
 	for {
+		// Cancelled (Ctrl+C, SIGTERM) — exit cleanly without dropping
+		// into another readMessage call.
+		if ctx.Err() != nil {
+			return nil
+		}
 		msg, ok := readMessage(scanner, r.Out)
 		if !ok {
 			return nil
@@ -91,6 +94,11 @@ func (r *Repl) Run(ctx context.Context) error {
 		}
 		// Natural-language input → run the pipeline.
 		if err := r.runTurn(ctx, msg); err != nil {
+			// On Ctrl+C the pipeline returns context.Canceled — that's
+			// not a failure to surface, just a quit. Skip the noise.
+			if ctx.Err() != nil {
+				return nil
+			}
 			fmt.Fprintf(r.Out, "turn failed: %v\n", err)
 		}
 	}
@@ -145,7 +153,8 @@ func (r *Repl) runTurn(ctx context.Context, msg string) error {
 	for i, t := range r.session.Turns {
 		prior[i] = specgen.Turn{UserMessage: t.UserMessage, FinalSpec: t.SpecAfter}
 	}
-	stageStart := make(map[string]time.Time)
+	ticker := newStageTicker(r.Out)
+	fmt.Fprintln(r.Out, "Drafting spec with Claude + Codex in parallel — typically 30–90s.")
 	in := specgen.Input{
 		UserRequest:       msg,
 		PriorTurns:        prior,
@@ -155,24 +164,12 @@ func (r *Repl) runTurn(ctx context.Context, msg string) error {
 		Recorder:          rec,
 		CritiqueEnabled:   r.CritiqueEnabled,
 		CritiqueThreshold: r.CritiqueThreshold,
-		OnStageStart: func(name string) {
-			r.outMu.Lock()
-			stageStart[name] = time.Now()
-			fmt.Fprintf(r.Out, "  · %s …\n", name)
-			r.outMu.Unlock()
-		},
-		OnStageEnd: func(name string, err error) {
-			r.outMu.Lock()
-			defer r.outMu.Unlock()
-			elapsed := time.Since(stageStart[name]).Round(time.Millisecond)
-			if err != nil {
-				fmt.Fprintf(r.Out, "  ✗ %s failed in %s: %v\n", name, elapsed, err)
-				return
-			}
-			fmt.Fprintf(r.Out, "  ✓ %s (%s)\n", name, elapsed)
-		},
+		OnStageStart:      ticker.Start,
+		OnStageEnd:        ticker.End,
+		OnStageProgress:   ticker.Progress,
 	}
 	out, err := specgen.Generate(ctx, in)
+	ticker.Stop()
 	if err != nil {
 		return err
 	}

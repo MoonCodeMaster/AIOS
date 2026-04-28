@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
@@ -35,10 +34,8 @@ func runOneShot(ctx context.Context, in OneShotInput) error {
 	if err != nil {
 		return fmt.Errorf("open run dir: %w", err)
 	}
-	fmt.Fprintln(in.Out, "running 4-stage pipeline…")
-	// OnStageStart may fire concurrently for the parallel draft stages,
-	// so guard writes to in.Out with a mutex.
-	var outMu sync.Mutex
+	fmt.Fprintln(in.Out, "Drafting spec with Claude + Codex in parallel — typically 30–90s.")
+	ticker := newStageTicker(in.Out)
 	out, err := specgen.Generate(ctx, specgen.Input{
 		UserRequest:       in.Prompt,
 		Claude:            in.Claude,
@@ -46,12 +43,11 @@ func runOneShot(ctx context.Context, in OneShotInput) error {
 		Recorder:          rec,
 		CritiqueEnabled:   in.CritiqueEnabled,
 		CritiqueThreshold: in.CritiqueThreshold,
-		OnStageStart: func(name string) {
-			outMu.Lock()
-			defer outMu.Unlock()
-			fmt.Fprintf(in.Out, "  · %s …\n", name)
-		},
+		OnStageStart:      ticker.Start,
+		OnStageEnd:        ticker.End,
+		OnStageProgress:   ticker.Progress,
 	})
+	ticker.Stop()
 	if err != nil {
 		return fmt.Errorf("specgen: %w", err)
 	}

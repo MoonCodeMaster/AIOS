@@ -1,6 +1,8 @@
 package specgen
 
 import (
+	"time"
+
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/MoonCodeMaster/AIOS/internal/run"
 )
@@ -18,6 +20,11 @@ type Input struct {
 	// draft-claude and draft-codex stages, which run in parallel goroutines.
 	OnStageStart func(name string)
 	OnStageEnd   func(name string, err error)
+	// OnStageProgress, when non-nil, fires every ~1s while a stage is in
+	// flight. Lets a TTY UI redraw an elapsed-time line so users can see
+	// progress on long-running engine invocations. May fire concurrently
+	// for parallel stages.
+	OnStageProgress func(name string, elapsed time.Duration)
 	// CritiqueEnabled gates stages 5 (critique) and 6 (conditional refine).
 	CritiqueEnabled bool
 	// CritiqueThreshold is the minimum score (0-12) to skip the refine stage.
@@ -86,4 +93,5 @@ type RegenerateInput struct {
 	CritiqueThreshold int
 	OnStageStart      func(string)
 	OnStageEnd        func(string, error)
+	OnStageProgress   func(name string, elapsed time.Duration)
 }

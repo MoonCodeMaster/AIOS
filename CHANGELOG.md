@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.3.1 — REPL responsiveness & Ctrl+C
+
+### Fixes
+
+- fix(engine): wire `TimeoutSec` into a real `context.WithTimeout` deadline.
+  Was configured (default 600s) but never enforced — a wedged `claude` or
+  `codex` invocation hung the pipeline forever. Also sets
+  `cmd.WaitDelay = 500ms` so descendants holding inherited stdio pipes
+  don't keep `Wait()` blocked after the kill. Timeout now surfaces as
+  `claude timed out after 600s — check 'aios doctor' …` instead of
+  `signal: killed (stderr: )`.
+- fix(cli): Ctrl+C exits the REPL. Previously `bufio.Scanner.Scan` blocked
+  on stdin and ignored the cancelled context, so the user had to also press
+  Enter or Ctrl+D. The signal handler now closes stdin to wake the scanner;
+  a second Ctrl+C is a hard exit (130).
+- fix(cli): no more spurious `aios: interrupt received, cancelling…` on
+  every clean exit (`--version`, normal command completion). The line now
+  fires only on a real signal.
+- fix(cli): suppress `turn failed: context canceled` on Ctrl+C — the REPL
+  exits silently on cancel.
+
+### Improvements
+
+- feat(cli): live status line during the dual-AI pipeline. In a TTY, a
+  single redrawing line shows every active stage with elapsed time
+  (`↻ draft-claude 23s · draft-codex 19s`), collapsing to permanent
+  ✓/✗ summary lines as each stage finishes. Non-TTY (pipes, CI) keeps
+  the old per-line output. Resolves the "stuck on draft-claude / codex
+  not running" confusion — both drafts ran in parallel; nothing rendered
+  their progress.
+- feat(specgen): new `OnStageProgress(name, elapsed)` callback on
+  `Input` and `RegenerateInput`, fired ~every 1s while a stage is in
+  flight. Drives the live status UI; safe for concurrent stages.
+- feat(cli): pre-pipeline banner (`Drafting spec with Claude + Codex in
+  parallel — typically 30–90s.`) so users see what they're waiting for
+  before any stage starts.
+
 ## v0.3.0 — CLI UX pass
 
 ### Breaking changes

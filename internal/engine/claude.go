@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
+	"time"
 )
 
 type ClaudeEngine struct {
@@ -28,8 +30,18 @@ func (c *ClaudeEngine) Invoke(ctx context.Context, req InvokeRequest) (*InvokeRe
 }
 
 func (c *ClaudeEngine) invoke(ctx context.Context, req InvokeRequest) (*InvokeResponse, error) {
+	if c.TimeoutSec > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(c.TimeoutSec)*time.Second)
+		defer cancel()
+	}
 	args := buildClaudeArgs(req, c.ExtraArgs)
 	cmd := exec.CommandContext(ctx, c.Binary, args...)
+	// Force-close inherited stdio after a short grace period when the
+	// context cancels. Without this, descendants of a killed child can
+	// keep the stdout pipe open and Wait() blocks until they exit on
+	// their own — re-introducing the very hang we're fixing.
+	cmd.WaitDelay = 500 * time.Millisecond
 	if req.Workdir != "" {
 		cmd.Dir = req.Workdir
 	}
@@ -37,6 +49,9 @@ func (c *ClaudeEngine) invoke(ctx context.Context, req InvokeRequest) (*InvokeRe
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("claude timed out after %ds — check `aios doctor` and your auth (ANTHROPIC_AUTH_TOKEN / login)", c.TimeoutSec)
+		}
 		return nil, fmt.Errorf("claude exec: %w (stderr: %s)", err, stderr.String())
 	}
 	resp, err := parseClaudeOutput(stdout.Bytes())
