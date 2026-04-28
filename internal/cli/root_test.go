@@ -133,3 +133,25 @@ func TestRoot_NoHelpDumpOnUnknownCommand(t *testing.T) {
 		t.Fatalf("unknown command triggered help dump:\n%s", combined)
 	}
 }
+
+func TestContinue_HasShortForm(t *testing.T) {
+	root := NewRootCmd()
+	f := root.Flags().Lookup("continue")
+	if f == nil {
+		t.Fatal("--continue flag missing on root")
+	}
+	if f.Shorthand != "c" {
+		t.Errorf("--continue shorthand = %q; want %q", f.Shorthand, "c")
+	}
+}
+
+func TestContinue_NotPersistent(t *testing.T) {
+	root := NewRootCmd()
+	if root.PersistentFlags().Lookup("continue") != nil {
+		t.Error("--continue should not be on PersistentFlags in v0.3")
+	}
+	statusCmd, _, _ := root.Find([]string{"status"})
+	if statusCmd.Flags().Lookup("continue") != nil {
+		t.Error("subcommand `status` inherited --continue; should not")
+	}
+}
