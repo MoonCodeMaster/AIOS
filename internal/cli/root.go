@@ -66,6 +66,11 @@ func NewRootCmd() *cobra.Command {
 			if err := validateRootFlags(args, print, resumeID); err != nil {
 				return err
 			}
+			if len(args) > 0 {
+				if hint := renamedCommandHint(args[0]); hint != "" {
+					return errors.New(hint)
+				}
+			}
 			if len(args) == 0 {
 				return launchRepl(cmd.Context(), resumeID)
 			}
@@ -79,6 +84,12 @@ func NewRootCmd() *cobra.Command {
 	root.PersistentFlags().String("config", ".aios/config.toml", "path to AIOS config")
 	root.PersistentFlags().String("log-level", "info", "log level: debug|info|warn|error")
 	root.Flags().StringP("continue", "c", "", "resume an REPL session (empty = latest, or pass a session ID)")
+	// NoOptDefVal makes -c (and --continue) accept being given without an
+	// argument; the sentinel "@latest" is translated by launchRepl into the
+	// empty-string semantics that bootSession recognises as "use latest".
+	if f := root.Flags().Lookup("continue"); f != nil {
+		f.NoOptDefVal = "@latest"
+	}
 	root.Flags().BoolP("print", "p", false, "print the generated spec to stdout (no project.md write, no shipping)")
 	root.AddCommand(newShipCmd())
 	root.AddCommand(newStatusCmd())
@@ -183,6 +194,9 @@ func launchRepl(ctx context.Context, resumeID string) error {
 	if err != nil {
 		return err
 	}
+	if resumeID == "@latest" {
+		resumeID = "" // bootSession treats empty as "auto-resume latest if any"
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getwd: %w", err)
@@ -200,4 +214,21 @@ func launchRepl(ctx context.Context, resumeID string) error {
 		CritiqueThreshold: cfg.Specgen.Threshold(),
 	}
 	return r.Run(ctx)
+}
+
+// renamedCommandHint returns a migration hint when a user types a v0.2
+// command name as the first positional arg of bare `aios`. Empty string
+// means "no hint, proceed as normal prompt".
+func renamedCommandHint(arg string) string {
+	switch arg {
+	case "resume":
+		return "`aios resume` is now `aios unblock` — try `aios unblock <task-id>`"
+	case "ship":
+		// Bare aios with "ship" as first arg — could be ambiguous with
+		// the actual `ship` subcommand. Cobra dispatches `ship` correctly
+		// because subcommand-matching wins over RunE; we never reach this
+		// case for `aios ship "prompt"`. Keep entry empty for safety.
+		return ""
+	}
+	return ""
 }

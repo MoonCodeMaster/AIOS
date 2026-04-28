@@ -156,6 +156,62 @@ func TestContinue_NotPersistent(t *testing.T) {
 	}
 }
 
+func TestContinue_BareDashCBootsLatest(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".aios"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgBody := "schema_version = 1\n[project]\nname = \"x\"\nbase_branch = \"main\"\nstaging_branch = \"aios/staging\"\n[engines]\ncoder_default = \"claude\"\nreviewer_default = \"codex\"\n[engines.claude]\nbinary = \"claude-not-installed\"\ntimeout_sec = 600\n[engines.codex]\nbinary = \"codex-not-installed\"\ntimeout_sec = 600\n"
+	if err := os.WriteFile(filepath.Join(dir, ".aios", "config.toml"), []byte(cfgBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustChdir(t, dir)
+
+	root := NewRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetIn(strings.NewReader("/exit\n"))
+	root.SetArgs([]string{"-c"}) // bare -c, no argument
+
+	err := root.Execute()
+	// REPL boot will fail (dummy binaries). The key thing: NOT a flag-parse error.
+	if err != nil && strings.Contains(err.Error(), "flag needs an argument") {
+		t.Fatalf("bare -c errored as flag-needs-argument: %v", err)
+	}
+}
+
+func TestRoot_ResumeHintsAtUnblock(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".aios"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgBody := "schema_version = 1\n[project]\nname = \"x\"\nbase_branch = \"main\"\nstaging_branch = \"aios/staging\"\n[engines]\ncoder_default = \"claude\"\nreviewer_default = \"codex\"\n[engines.claude]\nbinary = \"claude\"\ntimeout_sec = 600\n[engines.codex]\nbinary = \"codex\"\ntimeout_sec = 600\n"
+	if err := os.WriteFile(filepath.Join(dir, ".aios", "config.toml"), []byte(cfgBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustChdir(t, dir)
+
+	root := NewRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"resume", "task-1"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error from `aios resume task-1`")
+	}
+	if !strings.Contains(err.Error(), "aios unblock") {
+		t.Errorf("error %q; want hint about aios unblock", err.Error())
+	}
+}
+
 func TestPersistent_DryRunYoloRemoved(t *testing.T) {
 	root := NewRootCmd()
 	for _, name := range []string{"dry-run", "yolo"} {
