@@ -31,7 +31,8 @@ func NewRootCmd() *cobra.Command {
 				print, _ := cmd.Flags().GetBool("print")
 				ship, _ := cmd.Flags().GetBool("ship")
 				resumeID, _ := cmd.Flags().GetString("continue")
-				if len(args) == 0 && !ship && !print && resumeID == "" && !hasAIOSConfig() {
+				configChanged := cmd.Flags().Changed("config")
+				if len(args) == 0 && !ship && !print && resumeID == "" && !configChanged && !hasAIOSConfig() {
 					printLandingCard(cmd.OutOrStdout())
 					// Mark RunE as handled so the original RunE (which would
 					// launch REPL) is bypassed.

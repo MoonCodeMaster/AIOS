@@ -82,3 +82,31 @@ func TestBareAIOS_WithPromptOutsideRepo_StillErrors(t *testing.T) {
 		t.Fatal("landing card should not appear when user supplied a prompt")
 	}
 }
+
+func TestBareAIOS_WithExplicitConfig_DoesNotPrintCard(t *testing.T) {
+	// `aios --config /path/to/real.toml` should NOT print the landing card,
+	// even when cwd has no .aios/. The user explicitly pointed at a config.
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	custom := filepath.Join(dir, "real.toml")
+	cfgBody := "schema_version = 1\n[project]\nname = \"x\"\nbase_branch = \"main\"\nstaging_branch = \"aios/staging\"\n[engines]\ncoder_default = \"claude\"\nreviewer_default = \"codex\"\n[engines.claude]\nbinary = \"claude-not-installed\"\ntimeout_sec = 600\n[engines.codex]\nbinary = \"codex-not-installed\"\ntimeout_sec = 600\n"
+	if err := os.WriteFile(custom, []byte(cfgBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustChdir(t, dir)
+
+	root := NewRootCmd()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"--config", custom})
+	root.SetIn(strings.NewReader("/exit\n"))
+
+	_ = root.Execute()
+	// REPL boot will fail (dummy binaries). We only assert no landing card.
+	if strings.Contains(out.String(), "You're not in an AIOS repo") {
+		t.Fatalf("printed landing card despite explicit --config:\n%s", out.String())
+	}
+}
