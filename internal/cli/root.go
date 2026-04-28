@@ -15,12 +15,14 @@ var Version = "dev"
 
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:         "aios",
-		Short:       "AIOS — dual-AI project orchestrator",
-		Long:        "Drives Claude CLI and Codex CLI as a coder↔reviewer pair over a spec-driven task queue.",
-		Version:     Version,
-		Args:        cobra.ArbitraryArgs,
-		Annotations: map[string]string{gateAnnotation: gateLevelAIOS},
+		Use:           "aios",
+		Short:         "AIOS — dual-AI project orchestrator",
+		Long:          "Drives Claude CLI and Codex CLI as a coder↔reviewer pair over a spec-driven task queue.",
+		Version:       Version,
+		Args:          cobra.ArbitraryArgs,
+		Annotations:   map[string]string{gateAnnotation: gateLevelAIOS},
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Help, completion script generator, and shell-completion backends
 			// (__complete / __completeNoDesc — invoked by generated bash/zsh/fish

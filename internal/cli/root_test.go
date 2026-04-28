@@ -78,3 +78,25 @@ func TestRoot_CompletionBackend_RunsAnywhere(t *testing.T) {
 		t.Fatalf("__complete should not be gate-blocked: %v", err)
 	}
 }
+
+func TestRoot_NoHelpDumpOnError(t *testing.T) {
+	dir := t.TempDir()
+	mustChdir(t, dir)
+
+	root := NewRootCmd()
+	root.SetArgs([]string{"status"}) // gate will fail outside repo
+	var out, errBuf bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errBuf)
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	combined := out.String() + errBuf.String()
+	if strings.Contains(combined, "Usage:") {
+		t.Fatalf("error output included help dump:\n%s", combined)
+	}
+	if strings.Contains(combined, "Available Commands:") {
+		t.Fatalf("error output included subcommand list:\n%s", combined)
+	}
+}
