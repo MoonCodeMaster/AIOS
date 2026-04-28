@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.3.0 — CLI UX pass
+
+### Breaking changes
+
+- `aios --ship "prompt"` is removed. Use `aios ship "prompt"`.
+- `aios resume <task>` renamed to `aios unblock <task>`.
+- `--continue` is no longer a persistent flag — use `aios -c [id]` (root only).
+- `--dry-run` and `--yolo` are no longer persistent — they only appear on `aios ship` and `aios run`.
+- Bare `aios` outside an AIOS repo prints a friendly landing card and exits 0 (was: error + full help dump).
+- `aios "prompt"` outside an AIOS repo errors with a one-line hint (was: error + full help dump).
+
+### Improvements
+
+- `--config <path>` now actually works (was silently ignored).
+- All "no config" / "not in repo" errors come from one canonical message.
+- Cobra usage dump is suppressed on errors — error messages stand alone.
+- `--help` is grouped: Session / Pipeline / Setup / Inspection / Flags.
+- `aios init` now hints at the next command (`aios doctor`).
+- `aios doctor` runs in git-only repos (no longer needs `.aios/config.toml` first), so it can diagnose a pre-init machine.
+
+### Migration
+
+| Before | After |
+|---|---|
+| `aios --ship "x"` | `aios ship "x"` |
+| `aios --continue id` | `aios -c id` or `aios --continue id` |
+| `aios resume task-1` | `aios unblock task-1` |
+| `aios run --dry-run` | unchanged (still works; flag now per-command) |
+| `aios status --dry-run` | flag removed (it never did anything on `status`) |
+
 ## v0.2.1
 
 - fix(cli): REPL submits on a single Enter and prints stage durations, so the

@@ -14,7 +14,7 @@ ready — the only human step in the loop.
 ```
 aios                       # interactive REPL — talk, refine, /ship when ready
 aios "build X"             # one-shot spec → .aios/project.md, no execution
-aios --ship "build X"      # full pipeline: specgen → decompose → execute → PR → merge
+aios ship "build X"        # full pipeline: specgen → decompose → execute → PR → merge
 ```
 
 All three run the same dual-AI specgen pipeline (Claude draft + Codex draft →
@@ -33,7 +33,7 @@ Two concrete goals:
    The same cross-model discipline runs through execution: the engine that
    wrote the code is never the one reviewing it.
 2. **Less human input than Claude or Codex CLI.** A single prompt with
-   `--ship` runs spec → tasks → coder↔reviewer → PR → merge end-to-end. The
+   `aios ship` runs spec → tasks → coder↔reviewer → PR → merge end-to-end. The
    REPL collapses spec refinement into a chat instead of repeated re-prompts.
 
 Single-model coding loops fail the same way every time: the model that wrote
@@ -152,7 +152,7 @@ troubleshoot `--no-optional`, air-gapped mirrors, or Windows on ARM.
 cd your-repo
 aios init                          # writes .aios/config.toml; autodetects Go/Node/Python/Rust
 aios doctor                        # one-shot preflight: engines, auth, repo, config
-aios --ship "Add a /health endpoint with a unit test"
+aios ship "Add a /health endpoint with a unit test"
 # specgen → tasks → coder↔reviewer → PR → CI → merge to main, no further prompts.
 ```
 
@@ -160,7 +160,7 @@ If you want to inspect the spec before anything ships, drop `--ship`:
 
 ```bash
 aios "Add a /health endpoint with a unit test"
-# writes .aios/project.md and exits. Edit, then `aios --ship` (no prompt) ships
+# writes .aios/project.md and exits. Edit, then `aios ship` (no prompt) ships
 # the existing spec, or run `aios` for an interactive refinement loop.
 ```
 
@@ -170,7 +170,7 @@ aios "Add a /health endpoint with a unit test"
 |---|---|
 | `aios` | Interactive REPL. Each turn produces a unified spec via the dual-AI pipeline; `/ship` hands off to the autopilot. |
 | `aios "<prompt>"` | One-shot specgen. Writes `.aios/project.md` and exits. |
-| `aios --ship "<prompt>"` | Full pipeline: specgen → decompose → execute → PR → merge. |
+| `aios ship "<prompt>"` | Full pipeline: specgen → decompose → execute → PR → merge. |
 | `aios -p "<prompt>"` | Print polished spec to stdout. No project.md write, no side effects. |
 | `aios --continue [<id>]` | Resume the latest REPL session, or a specific session id. |
 | `aios init` | Bootstrap `.aios/config.toml` for the current repo. |
@@ -240,7 +240,7 @@ final. With either Claude or Codex missing from PATH the REPL refuses to launch
 ## Ship mode (one prompt to merged PR)
 
 ```bash
-aios --ship "Add a /health endpoint with a unit test"
+aios ship "Add a /health endpoint with a unit test"
 ```
 
 Runs specgen, writes `.aios/project.md`, decomposes into task files, runs the
