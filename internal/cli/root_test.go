@@ -212,6 +212,41 @@ func TestRoot_ResumeHintsAtUnblock(t *testing.T) {
 	}
 }
 
+func TestContinue_DashCWithSpaceSeparatedID(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".aios"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgBody := "schema_version = 1\n[project]\nname = \"x\"\nbase_branch = \"main\"\nstaging_branch = \"aios/staging\"\n[engines]\ncoder_default = \"claude\"\nreviewer_default = \"codex\"\n[engines.claude]\nbinary = \"claude-not-installed\"\ntimeout_sec = 600\n[engines.codex]\nbinary = \"codex-not-installed\"\ntimeout_sec = 600\n"
+	if err := os.WriteFile(filepath.Join(dir, ".aios", "config.toml"), []byte(cfgBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustChdir(t, dir)
+
+	root := NewRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetIn(strings.NewReader(""))
+	root.SetArgs([]string{"-c", "session-abc"})
+	err := root.Execute()
+	// REPL boot will fail because the session file doesn't exist or claude
+	// binary missing — what matters is that we did NOT get the
+	// "do not combine with a prompt" error and we did NOT treat "session-abc"
+	// as a one-shot prompt.
+	if err != nil && strings.Contains(err.Error(), "do not combine with a prompt") {
+		t.Fatalf("space-separated -c <id> rejected as prompt collision: %v", err)
+	}
+	// Output should mention session resume attempt OR REPL boot failure,
+	// NOT a one-shot prompt or specgen.
+	if strings.Contains(buf.String(), "specgen") || strings.Contains(buf.String(), "synthesizing") {
+		t.Fatalf("space-separated -c <id> triggered specgen instead of session resume:\n%s", buf.String())
+	}
+}
+
 func TestPersistent_DryRunYoloRemoved(t *testing.T) {
 	root := NewRootCmd()
 	for _, name := range []string{"dry-run", "yolo"} {

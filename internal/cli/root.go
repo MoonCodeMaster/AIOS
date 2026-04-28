@@ -63,6 +63,15 @@ func NewRootCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			print, _ := cmd.Flags().GetBool("print")
 			resumeID, _ := cmd.Flags().GetString("continue")
+
+			// Claude-CLI-style space-separated `aios -c <id>`: pflag sees `-c` alone
+			// (consuming the NoOptDefVal sentinel) and treats <id> as a positional.
+			// Reinterpret: if -c was given (sentinel present), no -p, and exactly one
+			// positional, that positional IS the session ID.
+			if resumeID == "@latest" && !print && len(args) == 1 {
+				return launchRepl(cmd.Context(), args[0])
+			}
+
 			if err := validateRootFlags(args, print, resumeID); err != nil {
 				return err
 			}
