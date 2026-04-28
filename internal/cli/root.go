@@ -24,12 +24,14 @@ func NewRootCmd() *cobra.Command {
 		Args:        cobra.ArbitraryArgs,
 		Annotations: map[string]string{gateAnnotation: gateLevelAIOS},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			// Help/version paths bypass gating.
-			if cmd.Name() == "help" || cmd.CalledAs() == "help" {
-				return nil
-			}
-			// Auto-generated `completion` and its subcommands bypass gating.
-			if cmd.Name() == "completion" || (cmd.Parent() != nil && cmd.Parent().Name() == "completion") {
+			// Help, completion script generator, and shell-completion backends
+			// (__complete / __completeNoDesc — invoked by generated bash/zsh/fish
+			// scripts on every tab press) all bypass gating.
+			if cmd.Name() == "help" || cmd.CalledAs() == "help" ||
+				cmd.Name() == "completion" ||
+				cmd.Name() == cobra.ShellCompRequestCmd ||
+				cmd.Name() == cobra.ShellCompNoDescRequestCmd ||
+				(cmd.Parent() != nil && cmd.Parent().Name() == "completion") {
 				return nil
 			}
 			level := cmd.Annotations[gateAnnotation]

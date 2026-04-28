@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestRoot_GateAIOS_DefaultForUnannotated(t *testing.T) {
@@ -54,14 +56,25 @@ func TestRoot_GateGit_DoctorPreRunPasses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Doctor would call os.Exit on FAIL — for this test we only verify the
-	// gate accepts the command. Invoke PersistentPreRunE directly with a
-	// context wired from the parent command.
-	cmd.SetContext(root.Context())
-	if root.PersistentPreRunE == nil {
-		t.Fatal("PersistentPreRunE is nil; expected gate dispatch")
+	// Stub out RunE so doctor doesn't actually run engines / call os.Exit.
+	cmd.RunE = func(*cobra.Command, []string) error { return nil }
+	cmd.Run = nil
+	root.SetArgs([]string{"doctor"})
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("doctor gate-rejected in git-only repo: %v", err)
 	}
-	if err := root.PersistentPreRunE(cmd, []string{}); err != nil {
-		t.Fatalf("doctor pre-run rejected in git-only repo: %v", err)
+}
+
+func TestRoot_CompletionBackend_RunsAnywhere(t *testing.T) {
+	dir := t.TempDir()
+	mustChdir(t, dir)
+	root := NewRootCmd()
+	root.SetArgs([]string{"__complete", "doctor", ""})
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("__complete should not be gate-blocked: %v", err)
 	}
 }
