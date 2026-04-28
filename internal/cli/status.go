@@ -11,8 +11,9 @@ import (
 
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
-		Short: "Print current task list with status",
+		Use:         "status",
+		Short:       "Print current task list with status",
+		Annotations: map[string]string{gateAnnotation: gateLevelAIOS},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			wd, err := os.Getwd()
 			if err != nil {

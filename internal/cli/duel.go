@@ -38,8 +38,9 @@ type duelResult struct {
 // verdict) is persisted under .aios/runs/<id>/duel/ for review.
 func newDuelCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "duel <task description>",
-		Short: "Race Claude and Codex on the same task; reviewer picks the winner",
+		Use:         "duel <task description>",
+		Short:       "Race Claude and Codex on the same task; reviewer picks the winner",
+		Annotations: map[string]string{gateAnnotation: gateLevelAIOS},
 		Long: `aios duel runs both AI engines as coders on the same task in parallel,
 in two ephemeral git worktrees. When both have stopped, the project's
 reviewer-default engine reads both diffs and picks a winner on three axes:

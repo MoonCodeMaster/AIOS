@@ -29,8 +29,9 @@ import (
 // `aios init`.
 func newReviewCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "review <pr-number-or-url>",
-		Short: "Cross-model PR review: both engines review, synthesizer merges, you decide whether to post",
+		Use:         "review <pr-number-or-url>",
+		Short:       "Cross-model PR review: both engines review, synthesizer merges, you decide whether to post",
+		Annotations: map[string]string{gateAnnotation: gateLevelAIOS},
 		Long: `aios review fetches a PR via the gh CLI, runs both Claude and Codex as
 reviewers in parallel, then asks the project's reviewer-default engine to
 merge their feedback into a single consolidated comment.

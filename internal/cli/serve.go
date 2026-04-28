@@ -16,8 +16,9 @@ import (
 
 func newServeCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "serve",
-		Short: "Watch GitHub issues with the aios:do label and run autopilot per issue",
+		Use:         "serve",
+		Short:       "Watch GitHub issues with the aios:do label and run autopilot per issue",
+		Annotations: map[string]string{gateAnnotation: gateLevelAIOS},
 		Long: `Watches a GitHub repo for issues labeled aios:do, runs autopilot per issue,
 opens PRs, comments back, files aios:stuck issues with the audit trail on
 abandon.

@@ -19,8 +19,9 @@ import (
 // shown at exit.
 func newCostCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "cost [run-id]",
-		Short: "Estimate the USD cost of a run from its on-disk audit trail",
+		Use:         "cost [run-id]",
+		Short:       "Estimate the USD cost of a run from its on-disk audit trail",
+		Annotations: map[string]string{gateAnnotation: gateLevelAIOS},
 		Long: `aios cost walks .aios/runs/<id>/**/coder.response.raw and
 reviewer.response.raw, sums tokens by engine, and applies the pricing table
 in internal/cost/pricing.go.

@@ -17,11 +17,31 @@ var Version = "dev"
 
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:     "aios",
-		Short:   "AIOS — dual-AI project orchestrator",
-		Long:    "Drives Claude CLI and Codex CLI as a coder↔reviewer pair over a spec-driven task queue.",
-		Version: Version,
-		Args:    cobra.ArbitraryArgs,
+		Use:         "aios",
+		Short:       "AIOS — dual-AI project orchestrator",
+		Long:        "Drives Claude CLI and Codex CLI as a coder↔reviewer pair over a spec-driven task queue.",
+		Version:     Version,
+		Args:        cobra.ArbitraryArgs,
+		Annotations: map[string]string{gateAnnotation: gateLevelAIOS},
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Help/version paths bypass gating.
+			if cmd.Name() == "help" || cmd.CalledAs() == "help" {
+				return nil
+			}
+			// Auto-generated `completion` and its subcommands bypass gating.
+			if cmd.Name() == "completion" || (cmd.Parent() != nil && cmd.Parent().Name() == "completion") {
+				return nil
+			}
+			level := cmd.Annotations[gateAnnotation]
+			gate := selectGate(level)
+			configPath, _ := cmd.Flags().GetString("config")
+			ctx, err := gate(cmd.Context(), configPath)
+			if err != nil {
+				return err
+			}
+			cmd.SetContext(ctx)
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ship, _ := cmd.Flags().GetBool("ship")
 			print, _ := cmd.Flags().GetBool("print")

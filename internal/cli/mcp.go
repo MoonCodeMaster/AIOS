@@ -21,8 +21,9 @@ import (
 // existing blocks, and refuses to add a duplicate preset.
 func newMCPCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "mcp",
-		Short: "Manage MCP server configuration",
+		Use:         "mcp",
+		Short:       "Manage MCP server configuration",
+		Annotations: map[string]string{gateAnnotation: gateLevelAIOS},
 	}
 	c.AddCommand(newMCPScaffoldCmd())
 	c.AddCommand(newMCPListCmd())

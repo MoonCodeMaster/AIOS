@@ -63,8 +63,9 @@ const v01Examples = `
 
 func newInitCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "init",
-		Short: "Bootstrap AIOS in the current repo",
+		Use:         "init",
+		Short:       "Bootstrap AIOS in the current repo",
+		Annotations: map[string]string{gateAnnotation: gateLevelGit},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			wd, err := os.Getwd()
 			if err != nil {

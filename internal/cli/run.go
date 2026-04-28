@@ -57,9 +57,10 @@ func recordTaskOutcome(taskID string, outcome *orchestrator.Outcome) {
 
 func newRunCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "run",
-		Short: "Iterate over pending tasks in dependency order",
-		RunE:  runMain,
+		Use:         "run",
+		Short:       "Iterate over pending tasks in dependency order",
+		Annotations: map[string]string{gateAnnotation: gateLevelAIOS},
+		RunE:        runMain,
 	}
 	c.Flags().Int("max-rounds", 0, "override max rounds per task")
 	c.Flags().Int("max-tokens", 0, "override max tokens per task")
