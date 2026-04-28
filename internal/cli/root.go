@@ -2,41 +2,109 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/MoonCodeMaster/AIOS/internal/config"
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/spf13/cobra"
 )
 
 // Version is stamped by GoReleaser at build time.
-var Version = "dev"
+var Version = "0.3.0"
 
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:     "aios",
-		Short:   "AIOS — dual-AI project orchestrator",
-		Long:    "Drives Claude CLI and Codex CLI as a coder↔reviewer pair over a spec-driven task queue.",
-		Version: Version,
-		Args:    cobra.ArbitraryArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ship, _ := cmd.Flags().GetBool("ship")
-			print, _ := cmd.Flags().GetBool("print")
-			resumeID, _ := cmd.Flags().GetString("continue")
-			if err := validateRootFlags(args, ship, print, resumeID); err != nil {
+		Use:           "aios",
+		Short:         "AIOS — dual-AI project orchestrator",
+		Long:          "Drives Claude CLI and Codex CLI as a coder↔reviewer pair over a spec-driven task queue.",
+		Version:       Version,
+		Args:          cobra.ArbitraryArgs,
+		Annotations:   map[string]string{gateAnnotation: gateLevelAIOS},
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Help, completion script generator, and shell-completion backends
+			// (__complete / __completeNoDesc — invoked by generated bash/zsh/fish
+			// scripts on every tab press) all bypass gating.
+			if cmd.Name() == "help" || cmd.CalledAs() == "help" ||
+				cmd.Name() == "completion" ||
+				cmd.Name() == cobra.ShellCompRequestCmd ||
+				cmd.Name() == cobra.ShellCompNoDescRequestCmd ||
+				(cmd.Parent() != nil && cmd.Parent().Name() == "completion") {
+				return nil
+			}
+
+			// Cobra retains c.ctx across Execute() calls on the same root, so
+			// per-execution markers (e.g. landing-card flag) would leak into
+			// the next run when a root command is reused (tests, embeddings).
+			// Reset to a fresh context here so each Execute() starts clean.
+			cmd.Root().SetContext(context.Background())
+
+			// Renamed-command migration hint: fire BEFORE the gate so v0.2 users
+			// who run `aios resume task-1` from any directory get the hint instead
+			// of a misleading "not a git repo" gate error.
+			if cmd == cmd.Root() && len(args) > 0 {
+				if hint := renamedCommandHint(args[0]); hint != "" {
+					return errors.New(hint)
+				}
+			}
+
+			// Special case: bare `aios` (root command, no positional args, no
+			// pipeline-mode flags) prints a landing card instead of erroring
+			// when .aios/config.toml is missing.
+			if cmd == cmd.Root() {
+				print, _ := cmd.Flags().GetBool("print")
+				resumeID, _ := cmd.Flags().GetString("continue")
+				configChanged := cmd.Flags().Changed("config")
+				if len(args) == 0 && !print && resumeID == "" && !configChanged && !hasAIOSConfig() {
+					printLandingCard(cmd.OutOrStdout())
+					// Stash a marker on the context so RunE returns early instead
+					// of launching the REPL. Using a context flag (rather than
+					// mutating cmd.RunE) keeps the root command reusable across
+					// multiple Execute() calls — important for tests/embeddings.
+					cmd.SetContext(markLandingCard(cmd.Context()))
+					return nil
+				}
+			}
+			level := cmd.Annotations[gateAnnotation]
+			gate := selectGate(level)
+			configPath, _ := cmd.Flags().GetString("config")
+			ctx, err := gate(cmd.Context(), configPath)
+			if err != nil {
 				return err
 			}
+			cmd.SetContext(ctx)
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Landing-card path: PersistentPreRunE printed the card and stashed
+			// a marker on the context. Return early so we don't launch the REPL.
+			if landingCardPrinted(cmd.Context()) {
+				return nil
+			}
+
+			print, _ := cmd.Flags().GetBool("print")
+			resumeID, _ := cmd.Flags().GetString("continue")
+
+			// Claude-CLI-style space-separated `aios -c <id>`: pflag sees `-c` alone
+			// (consuming the NoOptDefVal sentinel) and treats <id> as a positional.
+			// Reinterpret: if -c was given (sentinel present), no -p, and exactly one
+			// positional, that positional IS the session ID.
+			if resumeID == "@latest" && !print && len(args) == 1 {
+				return launchRepl(cmd.Context(), args[0])
+			}
+
+			if err := validateRootFlags(args, print, resumeID); err != nil {
+				return err
+			}
+			// Renamed-command hint is handled in PersistentPreRunE so it fires
+			// before the gate (v0.2 users outside a repo still get the hint).
 			if len(args) == 0 {
 				return launchRepl(cmd.Context(), resumeID)
 			}
 			prompt := strings.Join(args, " ")
-			if ship {
-				_, err := launchShip(cmd.Context(), prompt)
-				return err
-			}
 			if print {
 				return launchPrintMode(cmd.Context(), prompt)
 			}
@@ -45,13 +113,17 @@ func NewRootCmd() *cobra.Command {
 	}
 	root.PersistentFlags().String("config", ".aios/config.toml", "path to AIOS config")
 	root.PersistentFlags().String("log-level", "info", "log level: debug|info|warn|error")
-	root.PersistentFlags().Bool("dry-run", false, "print actions without calling engines or writing git")
-	root.PersistentFlags().Bool("yolo", false, "on full success, merge aios/staging into base branch")
-	root.PersistentFlags().String("continue", "", "resume an REPL session (empty = latest, or pass a session ID); not the same as the 'aios resume' subcommand")
-	root.Flags().Bool("ship", false, "run the full ship pipeline: specgen + decompose + execute + PR + merge")
+	root.Flags().StringP("continue", "c", "", "resume an REPL session (empty = latest, or pass a session ID)")
+	// NoOptDefVal makes -c (and --continue) accept being given without an
+	// argument; the sentinel "@latest" is translated by launchRepl into the
+	// empty-string semantics that bootSession recognises as "use latest".
+	if f := root.Flags().Lookup("continue"); f != nil {
+		f.NoOptDefVal = "@latest"
+	}
 	root.Flags().BoolP("print", "p", false, "print the generated spec to stdout (no project.md write, no shipping)")
+	root.AddCommand(newShipCmd())
 	root.AddCommand(newStatusCmd())
-	root.AddCommand(newResumeCmd())
+	root.AddCommand(newUnblockCmd())
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newRunCmd())
 	root.AddCommand(newServeCmd())
@@ -61,38 +133,36 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newLessonsCmd())
 	root.AddCommand(newReviewCmd())
 	root.AddCommand(newMCPCmd())
+	installRootHelp(root)
 	return root
 }
 
 // validateRootFlags returns an error if the combination of args + flags
 // is illegal for the bare `aios` invocation. Extracted from RunE for
 // unit-testability.
-func validateRootFlags(args []string, ship, print bool, resumeID string) error {
+func validateRootFlags(args []string, print bool, resumeID string) error {
 	if len(args) == 0 {
-		if ship || print {
-			return fmt.Errorf("--ship and -p require a prompt argument")
+		if print {
+			return errors.New("-p requires a prompt argument")
 		}
 		return nil
 	}
-	if ship && print {
-		return fmt.Errorf("--ship and -p are mutually exclusive")
-	}
 	if resumeID != "" {
-		return fmt.Errorf("--continue is REPL-only; do not combine with a prompt")
+		return errors.New("--continue is REPL-only; do not combine with a prompt")
 	}
 	return nil
 }
 
-// launchShip boots real engines for `aios --ship "prompt"`, runs ShipPrompt,
+// launchShip boots real engines for `aios ship "prompt"`, runs ShipPrompt,
 // and returns the structured result.
 func launchShip(ctx context.Context, prompt string) (ShipResult, error) {
+	cfg, err := RequireConfigFromContext(ctx)
+	if err != nil {
+		return ShipResult{}, err
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return ShipResult{}, fmt.Errorf("getwd: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return ShipResult{}, fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
 	}
 	fmt.Fprintf(os.Stdout, "shipping %q…\n", prompt)
 	return ShipPrompt(ctx, ShipPromptInput{
@@ -108,13 +178,13 @@ func launchShip(ctx context.Context, prompt string) (ShipResult, error) {
 
 // launchOneShot boots real engines for `aios "prompt"`, runs runOneShot.
 func launchOneShot(ctx context.Context, prompt string) error {
+	cfg, err := RequireConfigFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getwd: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
 	}
 	return runOneShot(ctx, OneShotInput{
 		Wd:                wd,
@@ -129,13 +199,13 @@ func launchOneShot(ctx context.Context, prompt string) error {
 
 // launchPrintMode boots real engines for `aios -p "prompt"`, runs runPrintMode.
 func launchPrintMode(ctx context.Context, prompt string) error {
+	cfg, err := RequireConfigFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getwd: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
 	}
 	return runPrintMode(ctx, PrintModeInput{
 		Wd:                wd,
@@ -150,13 +220,16 @@ func launchPrintMode(ctx context.Context, prompt string) error {
 
 // launchRepl boots a Repl with real engines and stdio, then runs it.
 func launchRepl(ctx context.Context, resumeID string) error {
+	cfg, err := RequireConfigFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	if resumeID == "@latest" {
+		resumeID = "" // bootSession treats empty as "auto-resume latest if any"
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getwd: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
 	}
 	r := &Repl{
 		Wd:                wd,
@@ -171,4 +244,21 @@ func launchRepl(ctx context.Context, resumeID string) error {
 		CritiqueThreshold: cfg.Specgen.Threshold(),
 	}
 	return r.Run(ctx)
+}
+
+// renamedCommandHint returns a migration hint when a user types a v0.2
+// command name as the first positional arg of bare `aios`. Empty string
+// means "no hint, proceed as normal prompt".
+func renamedCommandHint(arg string) string {
+	switch arg {
+	case "resume":
+		return "`aios resume` is now `aios unblock` — try `aios unblock <task-id>`"
+	case "ship":
+		// Bare aios with "ship" as first arg — could be ambiguous with
+		// the actual `ship` subcommand. Cobra dispatches `ship` correctly
+		// because subcommand-matching wins over RunE; we never reach this
+		// case for `aios ship "prompt"`. Keep entry empty for safety.
+		return ""
+	}
+	return ""
 }

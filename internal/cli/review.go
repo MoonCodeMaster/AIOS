@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MoonCodeMaster/AIOS/internal/config"
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/MoonCodeMaster/AIOS/internal/engine/prompts"
 	"github.com/MoonCodeMaster/AIOS/internal/run"
@@ -29,8 +28,11 @@ import (
 // `aios init`.
 func newReviewCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "review <pr-number-or-url>",
-		Short: "Cross-model PR review: both engines review, synthesizer merges, you decide whether to post",
+		Use:           "review <pr-number-or-url>",
+		Short:         "Cross-model PR review: both engines review, synthesizer merges, you decide whether to post",
+		Annotations:   map[string]string{gateAnnotation: gateLevelAIOS},
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		Long: `aios review fetches a PR via the gh CLI, runs both Claude and Codex as
 reviewers in parallel, then asks the project's reviewer-default engine to
 merge their feedback into a single consolidated comment.
@@ -61,13 +63,13 @@ func runReview(ctx context.Context, prArg string, post bool) error {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return fmt.Errorf("aios review requires the gh CLI on PATH (https://cli.github.com)")
 	}
-	wd, err := os.Getwd()
+	cfg, err := RequireConfigFromContext(ctx)
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
+	wd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("run `aios init` first: %w", err)
+		return err
 	}
 
 	prRef, err := parsePRRef(prArg)

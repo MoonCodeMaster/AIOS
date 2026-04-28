@@ -26,8 +26,11 @@ import (
 //   1 — one or more required checks failed
 func newDoctorCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "doctor",
-		Short: "Diagnose this machine: engines, auth, repo, config",
+		Use:           "doctor",
+		Short:         "Diagnose this machine: engines, auth, repo, config",
+		Annotations:   map[string]string{gateAnnotation: gateLevelGit},
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		Long: `aios doctor reports the status of every prerequisite in turn:
 
   - git ≥ 2.40 (required for worktree behaviour)

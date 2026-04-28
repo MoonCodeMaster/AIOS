@@ -13,11 +13,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newResumeCmd() *cobra.Command {
+func newUnblockCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "resume <task-id>",
-		Short: "Unblock a blocked task with an optional note",
-		Args:  cobra.ExactArgs(1),
+		Use:           "unblock <task-id>",
+		Short:         "Unblock a blocked task with an optional note",
+		Args:          cobra.ExactArgs(1),
+		Annotations:   map[string]string{gateAnnotation: gateLevelAIOS},
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskID := args[0]
 			wd, err := os.Getwd()

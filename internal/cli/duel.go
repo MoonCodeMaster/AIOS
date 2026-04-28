@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MoonCodeMaster/AIOS/internal/config"
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/MoonCodeMaster/AIOS/internal/engine/prompts"
 	"github.com/MoonCodeMaster/AIOS/internal/run"
@@ -38,8 +37,11 @@ type duelResult struct {
 // verdict) is persisted under .aios/runs/<id>/duel/ for review.
 func newDuelCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "duel <task description>",
-		Short: "Race Claude and Codex on the same task; reviewer picks the winner",
+		Use:           "duel <task description>",
+		Short:         "Race Claude and Codex on the same task; reviewer picks the winner",
+		Annotations:   map[string]string{gateAnnotation: gateLevelAIOS},
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		Long: `aios duel runs both AI engines as coders on the same task in parallel,
 in two ephemeral git worktrees. When both have stopped, the project's
 reviewer-default engine reads both diffs and picks a winner on three axes:
@@ -70,13 +72,13 @@ func runDuel(ctx context.Context, task string, apply bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	cfg, err := RequireConfigFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("cannot determine working directory: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return fmt.Errorf("run `aios init` first: %w", err)
 	}
 
 	runID := time.Now().UTC().Format("2006-01-02T15-04-05")

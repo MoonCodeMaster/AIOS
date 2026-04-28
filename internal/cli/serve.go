@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MoonCodeMaster/AIOS/internal/config"
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/MoonCodeMaster/AIOS/internal/githost"
 	"github.com/spf13/cobra"
@@ -16,8 +15,11 @@ import (
 
 func newServeCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "serve",
-		Short: "Watch GitHub issues with the aios:do label and run autopilot per issue",
+		Use:           "serve",
+		Short:         "Watch GitHub issues with the aios:do label and run autopilot per issue",
+		Annotations:   map[string]string{gateAnnotation: gateLevelAIOS},
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		Long: `Watches a GitHub repo for issues labeled aios:do, runs autopilot per issue,
 opens PRs, comments back, files aios:stuck issues with the audit trail on
 abandon.
@@ -128,13 +130,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 // a time; concurrent ShipPrompt calls in the same wd would race and need a
 // (beforeIDs, afterIDs) snapshot pattern inside ShipSpec.
 func inProcessShip(ctx context.Context, idea string) (AutopilotResult, error) {
-	wd, err := os.Getwd()
+	cfg, err := RequireConfigFromContext(ctx)
 	if err != nil {
 		return AutopilotResult{}, err
 	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
+	wd, err := os.Getwd()
 	if err != nil {
-		return AutopilotResult{}, fmt.Errorf("load config: %w", err)
+		return AutopilotResult{}, err
 	}
 	claude := &engine.ClaudeEngine{
 		Binary:     cfg.Engines.Claude.Binary,

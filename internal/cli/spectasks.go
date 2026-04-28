@@ -80,15 +80,15 @@ func commitSpec(wd, staging, source string) error {
 // decomposeOnly turns the existing .aios/project.md into task files via
 // codex's decompose prompt, writes them under .aios/tasks/, and commits
 // the result to the staging branch. Used by both ShipSpec and the REPL.
-func decomposeOnly(wd string) error {
+func decomposeOnly(ctx context.Context, wd string) error {
+	cfg, err := RequireConfigFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	specPath := filepath.Join(wd, ".aios", "project.md")
 	specBody, err := os.ReadFile(specPath)
 	if err != nil {
 		return fmt.Errorf("read project.md: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return err
 	}
 	codex := &engine.CodexEngine{
 		Binary:     cfg.Engines.Codex.Binary,
@@ -100,7 +100,7 @@ func decomposeOnly(wd string) error {
 	if err != nil {
 		return err
 	}
-	dRes, err := codex.Invoke(context.Background(), engine.InvokeRequest{Role: engine.RoleCoder, Prompt: dPrompt})
+	dRes, err := codex.Invoke(ctx, engine.InvokeRequest{Role: engine.RoleCoder, Prompt: dPrompt})
 	if err != nil {
 		return err
 	}
@@ -192,7 +192,7 @@ func ShipSpec(ctx context.Context, wd string) (ShipResult, error) {
 }
 
 func shipSpecAttempt(ctx context.Context, wd string, attempt int) (ShipResult, error) {
-	if err := decomposeOnly(wd); err != nil {
+	if err := decomposeOnly(ctx, wd); err != nil {
 		return ShipResult{}, fmt.Errorf("decompose: %w", err)
 	}
 
@@ -208,6 +208,7 @@ func shipSpecAttempt(ctx context.Context, wd string, attempt int) (ShipResult, e
 	defer setTaskOutcomeRecorder(nil)
 
 	runCmd := newRunCmd()
+	runCmd.SetContext(ctx)
 	if err := runCmd.Flags().Set("autopilot", "true"); err != nil {
 		return ShipResult{}, fmt.Errorf("set --autopilot: %w", err)
 	}
@@ -221,7 +222,7 @@ func shipSpecAttempt(ctx context.Context, wd string, attempt int) (ShipResult, e
 	// Decide whether to respec. Failures here never propagate as runtime
 	// errors — the original run result is authoritative; respec is best-effort.
 	if attempt < respecAttemptCap {
-		cfg, cfgErr := config.Load(filepath.Join(wd, ".aios", "config.toml"))
+		cfg, cfgErr := RequireConfigFromContext(ctx)
 		if cfgErr == nil {
 			abandons, ids := collectAbandons(captured, &mu)
 			respecCfg := respecConfig{

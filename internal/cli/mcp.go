@@ -21,8 +21,11 @@ import (
 // existing blocks, and refuses to add a duplicate preset.
 func newMCPCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "mcp",
-		Short: "Manage MCP server configuration",
+		Use:           "mcp",
+		Short:         "Manage MCP server configuration",
+		Annotations:   map[string]string{gateAnnotation: gateLevelNone},
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 	c.AddCommand(newMCPScaffoldCmd())
 	c.AddCommand(newMCPListCmd())
@@ -31,8 +34,11 @@ func newMCPCmd() *cobra.Command {
 
 func newMCPScaffoldCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "scaffold <preset>",
-		Short: "Append a ready MCP server block to .aios/config.toml",
+		Use:           "scaffold <preset>",
+		Short:         "Append a ready MCP server block to .aios/config.toml",
+		Annotations:   map[string]string{gateAnnotation: gateLevelAIOS},
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		Long: `aios mcp scaffold appends a known-good [mcp.servers.<name>] block to
 .aios/config.toml so you do not have to write the TOML by hand.
 
@@ -54,8 +60,11 @@ blocks are not modified — re-running with the same preset reports
 
 func newMCPListCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "list",
-		Short: "List available MCP scaffold presets",
+		Use:           "list",
+		Short:         "List available MCP scaffold presets",
+		Annotations:   map[string]string{gateAnnotation: gateLevelNone},
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			names := make([]string, 0, len(mcpPresets))
 			for k := range mcpPresets {

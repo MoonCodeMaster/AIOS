@@ -57,9 +57,12 @@ func recordTaskOutcome(taskID string, outcome *orchestrator.Outcome) {
 
 func newRunCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "run",
-		Short: "Iterate over pending tasks in dependency order",
-		RunE:  runMain,
+		Use:           "run",
+		Short:         "Iterate over pending tasks in dependency order",
+		Annotations:   map[string]string{gateAnnotation: gateLevelAIOS},
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runMain,
 	}
 	c.Flags().Int("max-rounds", 0, "override max rounds per task")
 	c.Flags().Int("max-tokens", 0, "override max tokens per task")
@@ -71,17 +74,19 @@ func newRunCmd() *cobra.Command {
 	c.Flags().Int("max-tokens-run", 0, "override [parallel] max_tokens_per_run (0 = use config)")
 	c.Flags().Bool("autopilot", false, "drop stalled tasks instead of blocking with [NEEDS HUMAN]")
 	c.Flags().Bool("merge", false, "after a successful run, open PR aios/staging→main, wait for CI, squash-merge")
+	c.Flags().Bool("dry-run", false, "print actions without calling engines or writing git")
+	c.Flags().Bool("yolo", false, "on full success, merge aios/staging into base branch")
 	return c
 }
 
 func runMain(cmd *cobra.Command, args []string) error {
+	cfg, err := RequireConfigFromContext(cmd.Context())
+	if err != nil {
+		return err
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("cannot determine working directory: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
 	}
 	sandbox, _ := cmd.Flags().GetBool("sandbox")
 	if sandbox {

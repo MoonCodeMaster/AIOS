@@ -15,8 +15,11 @@ import (
 // spec rewrites, or refactors to pay back the most review-loop time.
 func newLessonsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "lessons",
-		Short: "Mine .aios/runs/ for recurring reviewer issues; report the top patterns",
+		Use:           "lessons",
+		Short:         "Mine .aios/runs/ for recurring reviewer issues; report the top patterns",
+		Annotations:   map[string]string{gateAnnotation: gateLevelAIOS},
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		Long: `aios lessons walks every reviewer-response.json under .aios/runs/ and
 emits a small report:
 
