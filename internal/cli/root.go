@@ -24,6 +24,21 @@ func NewRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Special case: bare `aios` (root command, no positional args, no
+			// pipeline-mode flags) prints a landing card instead of erroring
+			// when .aios/config.toml is missing.
+			if cmd == cmd.Root() {
+				print, _ := cmd.Flags().GetBool("print")
+				ship, _ := cmd.Flags().GetBool("ship")
+				resumeID, _ := cmd.Flags().GetString("continue")
+				if len(args) == 0 && !ship && !print && resumeID == "" && !hasAIOSConfig() {
+					printLandingCard(cmd.OutOrStdout())
+					// Mark RunE as handled so the original RunE (which would
+					// launch REPL) is bypassed.
+					cmd.RunE = func(*cobra.Command, []string) error { return nil }
+					return nil
+				}
+			}
 			// Help, completion script generator, and shell-completion backends
 			// (__complete / __completeNoDesc — invoked by generated bash/zsh/fish
 			// scripts on every tab press) all bypass gating.
