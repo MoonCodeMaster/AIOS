@@ -12,7 +12,7 @@ import (
 )
 
 // Version is stamped by GoReleaser at build time.
-var Version = "dev"
+var Version = "0.3.0"
 
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{

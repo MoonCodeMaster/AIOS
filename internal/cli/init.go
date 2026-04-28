@@ -69,6 +69,7 @@ func newInitCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
 			wd, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("cannot determine working directory: %w", err)
@@ -125,8 +126,13 @@ func newInitCmd() *cobra.Command {
 			}
 			appendGitignore(wd)
 			ensureStagingBranch(wd, cfg.Project.BaseBranch, cfg.Project.StagingBranch)
-			fmt.Printf("Wrote %s\n", cfgPath)
-			fmt.Printf("Ensured branch %s exists.\n", cfg.Project.StagingBranch)
+			relCfg, err := filepath.Rel(wd, cfgPath)
+			if err != nil {
+				relCfg = cfgPath
+			}
+			fmt.Fprintf(out, "✓ wrote %s\n", relCfg)
+			fmt.Fprintf(out, "✓ ensured branch %s exists\n\n", cfg.Project.StagingBranch)
+			fmt.Fprintln(out, "Next: run `aios doctor` to verify engines, then `aios \"your first idea\"`.")
 			return nil
 		},
 	}
