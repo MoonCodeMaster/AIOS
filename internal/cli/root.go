@@ -83,6 +83,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newLessonsCmd())
 	root.AddCommand(newReviewCmd())
 	root.AddCommand(newMCPCmd())
+	installRootHelp(root)
 	return root
 }
 
