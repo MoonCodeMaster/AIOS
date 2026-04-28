@@ -58,7 +58,8 @@ func gateGit(ctx context.Context, _ string) (context.Context, error) {
 
 func gateAIOS(ctx context.Context, configPath string) (context.Context, error) {
 	// Layered: must be in a git repo first.
-	if _, err := gateGit(ctx, ""); err != nil {
+	ctx, err := gateGit(ctx, "")
+	if err != nil {
 		return ctx, err
 	}
 	wd, err := os.Getwd()
@@ -71,24 +72,10 @@ func gateAIOS(ctx context.Context, configPath string) (context.Context, error) {
 	}
 	cfg, err := config.Load(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) || isNoSuchFile(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return ctx, errors.New("not an AIOS repo — run `aios init` here, or cd to an existing one")
 		}
 		return ctx, fmt.Errorf("load %s: %w", path, err)
 	}
 	return withConfig(ctx, cfg), nil
-}
-
-// isNoSuchFile peels through wrapping to detect ENOENT inside config.Load's
-// wrapped errors (which often format as `read X: open Y: no such file ...`).
-func isNoSuchFile(err error) bool {
-	if err == nil {
-		return false
-	}
-	for e := err; e != nil; e = errors.Unwrap(e) {
-		if errors.Is(e, os.ErrNotExist) {
-			return true
-		}
-	}
-	return false
 }
