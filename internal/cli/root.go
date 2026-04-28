@@ -82,7 +82,7 @@ func NewRootCmd() *cobra.Command {
 	root.Flags().BoolP("print", "p", false, "print the generated spec to stdout (no project.md write, no shipping)")
 	root.AddCommand(newShipCmd())
 	root.AddCommand(newStatusCmd())
-	root.AddCommand(newResumeCmd())
+	root.AddCommand(newUnblockCmd())
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newRunCmd())
 	root.AddCommand(newServeCmd())

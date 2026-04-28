@@ -21,7 +21,7 @@ type commandGroup struct {
 var rootGroups = []commandGroup{
 	{Heading: "Pipeline", Use: []string{"ship", "run", "serve", "duel", "review"}},
 	{Heading: "Setup", Use: []string{"init", "doctor", "mcp"}},
-	{Heading: "Inspection", Use: []string{"status", "cost", "lessons", "resume"}}, // TODO Task 11: rename "resume" → "unblock"
+	{Heading: "Inspection", Use: []string{"status", "cost", "lessons", "unblock"}},
 }
 
 var installRootHelpOnce sync.Once

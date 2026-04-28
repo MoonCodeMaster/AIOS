@@ -182,7 +182,7 @@ aios "Add a /health endpoint with a unit test"
 | `aios cost [run-id]` | USD estimate per run from the on-disk audit trail. |
 | `aios lessons` | Mine `.aios/runs/` for recurring reviewer-issue patterns. |
 | `aios mcp scaffold <preset>` | Append a ready MCP server block (github / fs-readonly / playwright). |
-| `aios resume`, `aios status` | Standard run-management helpers. |
+| `aios unblock`, `aios status` | Standard run-management helpers. |
 
 ## Interactive mode
 
@@ -229,7 +229,7 @@ Slash commands: `/show`, `/clear`, `/help`, `/ship`, `/exit`.
 
 Resume: `aios --continue` picks up the latest session, `aios --continue <session-id>`
 picks a specific one. Sessions persist to `.aios/sessions/<id>/session.json`
-after every turn. (Distinct from `aios resume <task-id>`, which unblocks a stuck task.)
+after every turn. (Distinct from `aios unblock <task-id>`, which unblocks a stuck task.)
 
 Failure handling: if one drafter dies, the surviving engine produces the spec
 alone and a warning is printed. If the merge step fails, the longer of the two

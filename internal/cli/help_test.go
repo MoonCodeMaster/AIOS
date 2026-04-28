@@ -28,8 +28,7 @@ func TestRootHelp_GroupedSections(t *testing.T) {
 	if !strings.Contains(out, "Full pipeline: spec") {
 		t.Errorf("Pipeline section missing `ship`'s short description")
 	}
-	// Inspection currently lists `resume`; Task 11 renames to `unblock`.
-	if !strings.Contains(out, "resume") && !strings.Contains(out, "unblock") {
-		t.Errorf("Inspection section missing resume/unblock entry")
+	if !strings.Contains(out, "unblock") {
+		t.Errorf("Inspection section missing `unblock` entry")
 	}
 }
