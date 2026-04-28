@@ -74,6 +74,8 @@ func newRunCmd() *cobra.Command {
 	c.Flags().Int("max-tokens-run", 0, "override [parallel] max_tokens_per_run (0 = use config)")
 	c.Flags().Bool("autopilot", false, "drop stalled tasks instead of blocking with [NEEDS HUMAN]")
 	c.Flags().Bool("merge", false, "after a successful run, open PR aios/staging→main, wait for CI, squash-merge")
+	c.Flags().Bool("dry-run", false, "print actions without calling engines or writing git")
+	c.Flags().Bool("yolo", false, "on full success, merge aios/staging into base branch")
 	return c
 }
 

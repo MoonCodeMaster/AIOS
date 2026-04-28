@@ -155,3 +155,30 @@ func TestContinue_NotPersistent(t *testing.T) {
 		t.Error("subcommand `status` inherited --continue; should not")
 	}
 }
+
+func TestPersistent_DryRunYoloRemoved(t *testing.T) {
+	root := NewRootCmd()
+	for _, name := range []string{"dry-run", "yolo"} {
+		if root.PersistentFlags().Lookup(name) != nil {
+			t.Errorf("--%s should not be on PersistentFlags in v0.3", name)
+		}
+	}
+	// Subcommands that don't use these flags must NOT see them.
+	for _, sub := range []string{"status", "init", "doctor", "cost", "lessons"} {
+		c, _, _ := root.Find([]string{sub})
+		for _, name := range []string{"dry-run", "yolo"} {
+			if c.Flags().Lookup(name) != nil {
+				t.Errorf("`%s` should not have --%s in v0.3", sub, name)
+			}
+		}
+	}
+	// run and ship MUST have them.
+	for _, sub := range []string{"run", "ship"} {
+		c, _, _ := root.Find([]string{sub})
+		for _, name := range []string{"dry-run", "yolo"} {
+			if c.Flags().Lookup(name) == nil {
+				t.Errorf("`%s` missing --%s in v0.3", sub, name)
+			}
+		}
+	}
+}

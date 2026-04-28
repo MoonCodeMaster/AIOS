@@ -78,8 +78,6 @@ func NewRootCmd() *cobra.Command {
 	}
 	root.PersistentFlags().String("config", ".aios/config.toml", "path to AIOS config")
 	root.PersistentFlags().String("log-level", "info", "log level: debug|info|warn|error")
-	root.PersistentFlags().Bool("dry-run", false, "print actions without calling engines or writing git")
-	root.PersistentFlags().Bool("yolo", false, "on full success, merge aios/staging into base branch")
 	root.Flags().StringP("continue", "c", "", "resume an REPL session (empty = latest, or pass a session ID)")
 	root.Flags().BoolP("print", "p", false, "print the generated spec to stdout (no project.md write, no shipping)")
 	root.AddCommand(newShipCmd())
