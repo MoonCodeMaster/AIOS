@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/MoonCodeMaster/AIOS/internal/config"
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/spf13/cobra"
 )
@@ -108,13 +106,13 @@ func validateRootFlags(args []string, ship, print bool, resumeID string) error {
 // launchShip boots real engines for `aios --ship "prompt"`, runs ShipPrompt,
 // and returns the structured result.
 func launchShip(ctx context.Context, prompt string) (ShipResult, error) {
+	cfg, err := MustConfigFromContext(ctx)
+	if err != nil {
+		return ShipResult{}, err
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return ShipResult{}, fmt.Errorf("getwd: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return ShipResult{}, fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
 	}
 	fmt.Fprintf(os.Stdout, "shipping %q…\n", prompt)
 	return ShipPrompt(ctx, ShipPromptInput{
@@ -130,13 +128,13 @@ func launchShip(ctx context.Context, prompt string) (ShipResult, error) {
 
 // launchOneShot boots real engines for `aios "prompt"`, runs runOneShot.
 func launchOneShot(ctx context.Context, prompt string) error {
+	cfg, err := MustConfigFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getwd: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
 	}
 	return runOneShot(ctx, OneShotInput{
 		Wd:                wd,
@@ -151,13 +149,13 @@ func launchOneShot(ctx context.Context, prompt string) error {
 
 // launchPrintMode boots real engines for `aios -p "prompt"`, runs runPrintMode.
 func launchPrintMode(ctx context.Context, prompt string) error {
+	cfg, err := MustConfigFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getwd: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
 	}
 	return runPrintMode(ctx, PrintModeInput{
 		Wd:                wd,
@@ -172,13 +170,13 @@ func launchPrintMode(ctx context.Context, prompt string) error {
 
 // launchRepl boots a Repl with real engines and stdio, then runs it.
 func launchRepl(ctx context.Context, resumeID string) error {
+	cfg, err := MustConfigFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getwd: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return fmt.Errorf("aios needs an initialised repo here — run `aios init` first: %w", err)
 	}
 	r := &Repl{
 		Wd:                wd,

@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MoonCodeMaster/AIOS/internal/config"
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/MoonCodeMaster/AIOS/internal/engine/prompts"
 	"github.com/MoonCodeMaster/AIOS/internal/run"
@@ -62,13 +61,13 @@ func runReview(ctx context.Context, prArg string, post bool) error {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return fmt.Errorf("aios review requires the gh CLI on PATH (https://cli.github.com)")
 	}
-	wd, err := os.Getwd()
+	cfg, err := MustConfigFromContext(ctx)
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
+	wd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("run `aios init` first: %w", err)
+		return err
 	}
 
 	prRef, err := parsePRRef(prArg)

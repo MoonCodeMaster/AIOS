@@ -76,13 +76,13 @@ func newRunCmd() *cobra.Command {
 }
 
 func runMain(cmd *cobra.Command, args []string) error {
+	cfg, err := MustConfigFromContext(cmd.Context())
+	if err != nil {
+		return err
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("cannot determine working directory: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
 	}
 	sandbox, _ := cmd.Flags().GetBool("sandbox")
 	if sandbox {

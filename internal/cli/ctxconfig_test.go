@@ -25,3 +25,9 @@ func TestConfigContext_Missing(t *testing.T) {
 		t.Fatal("ConfigFromContext returned ok=true on empty context; want false")
 	}
 }
+
+func TestMustConfigFromContext_ReturnsErrWhenMissing(t *testing.T) {
+	if _, err := MustConfigFromContext(context.Background()); err == nil {
+		t.Fatal("MustConfigFromContext should return error on empty context")
+	}
+}

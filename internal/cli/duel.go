@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MoonCodeMaster/AIOS/internal/config"
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/MoonCodeMaster/AIOS/internal/engine/prompts"
 	"github.com/MoonCodeMaster/AIOS/internal/run"
@@ -71,13 +70,13 @@ func runDuel(ctx context.Context, task string, apply bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	cfg, err := MustConfigFromContext(ctx)
+	if err != nil {
+		return err
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("cannot determine working directory: %w", err)
-	}
-	cfg, err := config.Load(filepath.Join(wd, ".aios", "config.toml"))
-	if err != nil {
-		return fmt.Errorf("run `aios init` first: %w", err)
 	}
 
 	runID := time.Now().UTC().Format("2006-01-02T15-04-05")
