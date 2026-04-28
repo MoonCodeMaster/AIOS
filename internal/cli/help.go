@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -20,8 +21,10 @@ type commandGroup struct {
 var rootGroups = []commandGroup{
 	{Heading: "Pipeline", Use: []string{"ship", "run", "serve", "duel", "review"}},
 	{Heading: "Setup", Use: []string{"init", "doctor", "mcp"}},
-	{Heading: "Inspection", Use: []string{"status", "cost", "lessons", "resume"}},
+	{Heading: "Inspection", Use: []string{"status", "cost", "lessons", "resume"}}, // TODO Task 11: rename "resume" → "unblock"
 }
+
+var installRootHelpOnce sync.Once
 
 // installRootHelp replaces Cobra's default help template for the root command
 // with a grouped layout. Subcommand help is unaffected: Cobra propagates
@@ -29,7 +32,9 @@ var rootGroups = []commandGroup{
 // template branches on `.HasParent` to fall back to the default rendering for
 // any subcommand.
 func installRootHelp(cmd *cobra.Command) {
-	cobra.AddTemplateFunc("rootUsage", rootUsage)
+	installRootHelpOnce.Do(func() {
+		cobra.AddTemplateFunc("rootUsage", rootUsage)
+	})
 	cmd.SetHelpTemplate(`{{if .HasParent}}{{with (or .Long .Short)}}{{. | trimTrailingWhitespaces}}
 
 {{end}}{{if or .Runnable .HasSubCommands}}{{.UsageString}}{{end}}{{else}}{{if .Long}}{{.Long}}{{else}}{{.Short}}{{end}}
