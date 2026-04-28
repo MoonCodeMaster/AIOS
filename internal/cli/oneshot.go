@@ -28,7 +28,7 @@ type OneShotInput struct {
 
 // runOneShot runs specgen on the prompt, writes the polished spec to
 // .aios/project.md, and prints a brief confirmation to Out. Used by
-// `aios "prompt"` (no flags). Does NOT ship — that's `aios --ship`.
+// `aios "prompt"` (no flags). Does NOT ship — that's `aios ship`.
 func runOneShot(ctx context.Context, in OneShotInput) error {
 	runID := time.Now().UTC().Format("2006-01-02T15-04-05")
 	rec, err := run.Open(filepath.Join(in.Wd, ".aios", "runs"), runID)
@@ -65,7 +65,7 @@ func runOneShot(ctx context.Context, in OneShotInput) error {
 	for _, w := range out.Warnings {
 		fmt.Fprintf(in.Out, "  ! %s\n", w)
 	}
-	fmt.Fprintf(in.Out, "Spec written to %s. Run `aios --ship %q` to implement, or open the REPL with `aios` to refine.\n", specPath, in.Prompt)
+	fmt.Fprintf(in.Out, "Spec written to %s. Run `aios ship %q` to implement, or open the REPL with `aios` to refine.\n", specPath, in.Prompt)
 	return nil
 }
 

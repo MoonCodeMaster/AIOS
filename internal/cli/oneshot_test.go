@@ -69,24 +69,20 @@ func TestValidateRootFlags(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
-		ship bool
 		prn  bool
 		cont string
 		want string // substring of expected error, or "" for nil
 	}{
-		{"no-args-no-flags-OK", []string{}, false, false, "", ""},
-		{"no-args-with-continue-OK", []string{}, false, false, "session-x", ""},
-		{"no-args-ship-rejected", []string{}, true, false, "", "require a prompt"},
-		{"no-args-print-rejected", []string{}, false, true, "", "require a prompt"},
-		{"prompt-no-flags-OK", []string{"build"}, false, false, "", ""},
-		{"prompt-ship-OK", []string{"build"}, true, false, "", ""},
-		{"prompt-print-OK", []string{"build"}, false, true, "", ""},
-		{"prompt-ship-and-print-rejected", []string{"build"}, true, true, "", "mutually exclusive"},
-		{"prompt-with-continue-rejected", []string{"build"}, false, false, "session-x", "REPL-only"},
+		{"no-args-no-flags-OK", []string{}, false, "", ""},
+		{"no-args-with-continue-OK", []string{}, false, "session-x", ""},
+		{"no-args-print-rejected", []string{}, true, "", "requires a prompt"},
+		{"prompt-no-flags-OK", []string{"build"}, false, "", ""},
+		{"prompt-print-OK", []string{"build"}, true, "", ""},
+		{"prompt-with-continue-rejected", []string{"build"}, false, "session-x", "REPL-only"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := validateRootFlags(c.args, c.ship, c.prn, c.cont)
+			err := validateRootFlags(c.args, c.prn, c.cont)
 			if c.want == "" {
 				if err != nil {
 					t.Fatalf("want nil, got %v", err)

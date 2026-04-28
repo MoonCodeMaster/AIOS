@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -29,10 +30,9 @@ func NewRootCmd() *cobra.Command {
 			// when .aios/config.toml is missing.
 			if cmd == cmd.Root() {
 				print, _ := cmd.Flags().GetBool("print")
-				ship, _ := cmd.Flags().GetBool("ship")
 				resumeID, _ := cmd.Flags().GetString("continue")
 				configChanged := cmd.Flags().Changed("config")
-				if len(args) == 0 && !ship && !print && resumeID == "" && !configChanged && !hasAIOSConfig() {
+				if len(args) == 0 && !print && resumeID == "" && !configChanged && !hasAIOSConfig() {
 					printLandingCard(cmd.OutOrStdout())
 					// Mark RunE as handled so the original RunE (which would
 					// launch REPL) is bypassed.
@@ -61,20 +61,15 @@ func NewRootCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ship, _ := cmd.Flags().GetBool("ship")
 			print, _ := cmd.Flags().GetBool("print")
 			resumeID, _ := cmd.Flags().GetString("continue")
-			if err := validateRootFlags(args, ship, print, resumeID); err != nil {
+			if err := validateRootFlags(args, print, resumeID); err != nil {
 				return err
 			}
 			if len(args) == 0 {
 				return launchRepl(cmd.Context(), resumeID)
 			}
 			prompt := strings.Join(args, " ")
-			if ship {
-				_, err := launchShip(cmd.Context(), prompt)
-				return err
-			}
 			if print {
 				return launchPrintMode(cmd.Context(), prompt)
 			}
@@ -86,8 +81,8 @@ func NewRootCmd() *cobra.Command {
 	root.PersistentFlags().Bool("dry-run", false, "print actions without calling engines or writing git")
 	root.PersistentFlags().Bool("yolo", false, "on full success, merge aios/staging into base branch")
 	root.PersistentFlags().String("continue", "", "resume an REPL session (empty = latest, or pass a session ID); not the same as the 'aios resume' subcommand")
-	root.Flags().Bool("ship", false, "run the full ship pipeline: specgen + decompose + execute + PR + merge")
 	root.Flags().BoolP("print", "p", false, "print the generated spec to stdout (no project.md write, no shipping)")
+	root.AddCommand(newShipCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newResumeCmd())
 	root.AddCommand(newInitCmd())
@@ -106,23 +101,20 @@ func NewRootCmd() *cobra.Command {
 // validateRootFlags returns an error if the combination of args + flags
 // is illegal for the bare `aios` invocation. Extracted from RunE for
 // unit-testability.
-func validateRootFlags(args []string, ship, print bool, resumeID string) error {
+func validateRootFlags(args []string, print bool, resumeID string) error {
 	if len(args) == 0 {
-		if ship || print {
-			return fmt.Errorf("--ship and -p require a prompt argument")
+		if print {
+			return errors.New("-p requires a prompt argument")
 		}
 		return nil
 	}
-	if ship && print {
-		return fmt.Errorf("--ship and -p are mutually exclusive")
-	}
 	if resumeID != "" {
-		return fmt.Errorf("--continue is REPL-only; do not combine with a prompt")
+		return errors.New("--continue is REPL-only; do not combine with a prompt")
 	}
 	return nil
 }
 
-// launchShip boots real engines for `aios --ship "prompt"`, runs ShipPrompt,
+// launchShip boots real engines for `aios ship "prompt"`, runs ShipPrompt,
 // and returns the structured result.
 func launchShip(ctx context.Context, prompt string) (ShipResult, error) {
 	cfg, err := RequireConfigFromContext(ctx)
