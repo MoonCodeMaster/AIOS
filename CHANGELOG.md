@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.1
+
+- fix(cli): REPL submits on a single Enter and prints stage durations, so the
+  prompt no longer appears frozen after typing. Multi-line input is opt-in via
+  trailing `\` continuation or a `"""…"""` block. Banner and `/help` updated.
+- fix(orchestrator): preserve task input order when enqueuing the initial
+  ready set and dependents released by completion, so deterministic specs run
+  in the order users wrote them.
+- ci(release): make `publish-npm` idempotent — skip versions already on the
+  registry and tolerate provenance fallback. Restrict the publish job to
+  `v*` tag pushes; non-tag runs use goreleaser snapshot mode.
+
 ## v0.2.0
 
 - feat(ship): regenerate spec when sibling tasks abandon with overlapping

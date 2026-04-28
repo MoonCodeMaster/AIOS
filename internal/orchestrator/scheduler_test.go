@@ -26,6 +26,18 @@ func TestSchedulerInitialReadySet(t *testing.T) {
 	}
 }
 
+func TestSchedulerInitialReadyOrderFollowsInput(t *testing.T) {
+	tasks := []*spec.Task{tk("b"), tk("a"), tk("c")}
+	s, err := NewScheduler(tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := drainReady(s, 3)
+	if !equal(got, []string{"b", "a", "c"}) {
+		t.Errorf("initial ready order = %v, want input order [b a c]", got)
+	}
+}
+
 func TestSchedulerCompletionAdvances(t *testing.T) {
 	tasks := []*spec.Task{tk("a"), tk("b", "a"), tk("c", "b")}
 	s, err := NewScheduler(tasks)
@@ -40,6 +52,23 @@ func TestSchedulerCompletionAdvances(t *testing.T) {
 	second := drainReady(s, 1)
 	if len(second) != 1 || second[0] != "b" {
 		t.Fatalf("after a converged, ready = %v, want [b]", second)
+	}
+}
+
+func TestSchedulerDependentReadyOrderFollowsInput(t *testing.T) {
+	tasks := []*spec.Task{tk("root"), tk("b", "root"), tk("a", "root"), tk("c", "root")}
+	s, err := NewScheduler(tasks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := drainReady(s, 1)
+	if len(first) != 1 || first[0] != "root" {
+		t.Fatalf("first ready = %v, want [root]", first)
+	}
+	s.Done(TaskResult{ID: "root", Status: "converged"})
+	got := drainReady(s, 3)
+	if !equal(got, []string{"b", "a", "c"}) {
+		t.Errorf("dependent ready order = %v, want input order [b a c]", got)
 	}
 }
 

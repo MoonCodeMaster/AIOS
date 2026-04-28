@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"os"
@@ -153,6 +154,61 @@ func TestReplShipCallsAutopilotHook(t *testing.T) {
 	}
 	if !called {
 		t.Fatalf("ShipFn was not called")
+	}
+}
+
+// TestReadMessage_SingleEnterSubmits documents the codex/claude-style UX:
+// pressing Enter once on a non-empty line submits immediately. The previous
+// behavior (require a blank line to submit) made the REPL look frozen — see
+// the "no response" bug report this test was added for.
+func TestReadMessage_SingleEnterSubmits(t *testing.T) {
+	s := bufio.NewScanner(strings.NewReader("hello\n"))
+	out := &bytes.Buffer{}
+	msg, ok := readMessage(s, out)
+	if !ok || msg != "hello" {
+		t.Fatalf("readMessage = (%q, %v), want (%q, true)", msg, ok, "hello")
+	}
+}
+
+func TestReadMessage_BlankLineRePrompts(t *testing.T) {
+	// Bare Enter on the primary prompt is a no-op; the next non-empty line submits.
+	s := bufio.NewScanner(strings.NewReader("\n\nhello\n"))
+	out := &bytes.Buffer{}
+	msg, ok := readMessage(s, out)
+	if !ok || msg != "hello" {
+		t.Fatalf("readMessage = (%q, %v), want (%q, true)", msg, ok, "hello")
+	}
+	if got := strings.Count(out.String(), "> "); got != 3 {
+		t.Fatalf("primary prompt count = %d, want 3 (bare-Enter re-prompts)", got)
+	}
+}
+
+func TestReadMessage_BackslashContinuation(t *testing.T) {
+	s := bufio.NewScanner(strings.NewReader("first\\\nsecond\n"))
+	out := &bytes.Buffer{}
+	msg, ok := readMessage(s, out)
+	if !ok || msg != "first\nsecond" {
+		t.Fatalf("readMessage = (%q, %v), want (%q, true)", msg, ok, "first\nsecond")
+	}
+	if !strings.Contains(out.String(), ".. ") {
+		t.Fatalf("expected continuation prompt '.. '; got: %q", out.String())
+	}
+}
+
+func TestReadMessage_TripleQuoteBlock(t *testing.T) {
+	s := bufio.NewScanner(strings.NewReader("\"\"\"\nline one\nline two\n\"\"\"\n"))
+	out := &bytes.Buffer{}
+	msg, ok := readMessage(s, out)
+	if !ok || msg != "line one\nline two" {
+		t.Fatalf("readMessage = (%q, %v), want (%q, true)", msg, ok, "line one\nline two")
+	}
+}
+
+func TestReadMessage_EOFReturnsFalse(t *testing.T) {
+	s := bufio.NewScanner(strings.NewReader(""))
+	out := &bytes.Buffer{}
+	if msg, ok := readMessage(s, out); ok || msg != "" {
+		t.Fatalf("readMessage = (%q, %v), want (\"\", false)", msg, ok)
 	}
 }
 

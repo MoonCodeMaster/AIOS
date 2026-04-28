@@ -62,7 +62,7 @@ func (r *Repl) Run(ctx context.Context) error {
 	scanner := bufio.NewScanner(r.In)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // long pasted prompts
 
-	fmt.Fprintln(r.Out, "aios — type a requirement, blank line to submit. /help for commands.")
+	fmt.Fprintln(r.Out, `aios — type a requirement and press Enter. End a line with "\" or wrap in """…""" for multi-line. /help for commands.`)
 	for {
 		msg, ok := readMessage(scanner, r.Out)
 		if !ok {
@@ -145,6 +145,7 @@ func (r *Repl) runTurn(ctx context.Context, msg string) error {
 	for i, t := range r.session.Turns {
 		prior[i] = specgen.Turn{UserMessage: t.UserMessage, FinalSpec: t.SpecAfter}
 	}
+	stageStart := make(map[string]time.Time)
 	in := specgen.Input{
 		UserRequest:       msg,
 		PriorTurns:        prior,
@@ -156,10 +157,20 @@ func (r *Repl) runTurn(ctx context.Context, msg string) error {
 		CritiqueThreshold: r.CritiqueThreshold,
 		OnStageStart: func(name string) {
 			r.outMu.Lock()
+			stageStart[name] = time.Now()
 			fmt.Fprintf(r.Out, "  · %s …\n", name)
 			r.outMu.Unlock()
 		},
-		OnStageEnd: func(_ string, _ error) {},
+		OnStageEnd: func(name string, err error) {
+			r.outMu.Lock()
+			defer r.outMu.Unlock()
+			elapsed := time.Since(stageStart[name]).Round(time.Millisecond)
+			if err != nil {
+				fmt.Fprintf(r.Out, "  ✗ %s failed in %s: %v\n", name, elapsed, err)
+				return
+			}
+			fmt.Fprintf(r.Out, "  ✓ %s (%s)\n", name, elapsed)
+		},
 	}
 	out, err := specgen.Generate(ctx, in)
 	if err != nil {
@@ -197,6 +208,7 @@ func (r *Repl) printSpec() {
 }
 
 func (r *Repl) printHelp() {
+	fmt.Fprintln(r.Out, `input: Enter submits. End a line with "\" to continue, or wrap in """…""" for multi-line.`)
 	fmt.Fprintln(r.Out, "commands:")
 	fmt.Fprintln(r.Out, "  /show   print current spec")
 	fmt.Fprintln(r.Out, "  /clear  discard session, start fresh")
@@ -221,19 +233,54 @@ func runAutopilotShip(ctx context.Context, wd string) error {
 	return err
 }
 
-// readMessage reads lines until a blank line (submit) or EOF.
+// readMessage reads one user prompt from stdin.
+//
+// A single Enter submits the line — matching the UX of codex and claude CLIs.
+// For typed multi-line input, two affordances are supported:
+//   - end a line with "\" to continue on the next line (the trailing "\" is dropped); or
+//   - open the prompt with a line containing only `"""` and close it with another `"""` line.
+//
+// A bare Enter on the primary prompt re-prompts without doing anything.
 func readMessage(s *bufio.Scanner, out io.Writer) (string, bool) {
-	fmt.Fprint(out, "> ")
-	var lines []string
-	for s.Scan() {
-		line := s.Text()
-		if line == "" {
-			return strings.Join(lines, "\n"), true
+	for {
+		fmt.Fprint(out, "> ")
+		if !s.Scan() {
+			return "", false
 		}
-		lines = append(lines, line)
+		first := s.Text()
+		if first == "" {
+			continue
+		}
+		if strings.TrimSpace(first) == `"""` {
+			var lines []string
+			for {
+				fmt.Fprint(out, ".. ")
+				if !s.Scan() {
+					return strings.Join(lines, "\n"), true
+				}
+				line := s.Text()
+				if strings.TrimSpace(line) == `"""` {
+					return strings.Join(lines, "\n"), true
+				}
+				lines = append(lines, line)
+			}
+		}
+		if strings.HasSuffix(first, `\`) {
+			lines := []string{strings.TrimSuffix(first, `\`)}
+			for {
+				fmt.Fprint(out, ".. ")
+				if !s.Scan() {
+					return strings.Join(lines, "\n"), true
+				}
+				cont := s.Text()
+				if strings.HasSuffix(cont, `\`) {
+					lines = append(lines, strings.TrimSuffix(cont, `\`))
+					continue
+				}
+				lines = append(lines, cont)
+				return strings.Join(lines, "\n"), true
+			}
+		}
+		return first, true
 	}
-	if len(lines) == 0 {
-		return "", false
-	}
-	return strings.Join(lines, "\n"), true
 }

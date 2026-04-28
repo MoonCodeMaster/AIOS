@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/MoonCodeMaster/AIOS/internal/spec"
@@ -33,6 +34,7 @@ type Scheduler struct {
 	inflight   int
 	settled    int
 	total      int
+	order      map[TaskID]int
 	// blocked records the structured reason for every task that is either
 	// directly blocked (by its own worker) or transitively blocked (via the
 	// cascade). Cascade entries use CodeUpstreamBlocked with Upstream set to
@@ -49,13 +51,15 @@ func NewScheduler(tasks []*spec.Task) (*Scheduler, error) {
 		deps:       map[TaskID]map[TaskID]struct{}{},
 		dependents: map[TaskID]map[TaskID]struct{}{},
 		blocked:    map[TaskID]BlockReason{},
+		order:      map[TaskID]int{},
 		total:      len(tasks),
 		ready:      make(chan TaskID, len(tasks)),
 		done:       make(chan struct{}),
 	}
-	for _, t := range tasks {
+	for i, t := range tasks {
 		s.pending[t.ID] = t
 		s.deps[t.ID] = map[TaskID]struct{}{}
+		s.order[t.ID] = i
 		for _, d := range t.DependsOn {
 			s.deps[t.ID][d] = struct{}{}
 		}
@@ -74,7 +78,11 @@ func NewScheduler(tasks []*spec.Task) (*Scheduler, error) {
 	if cyc := detectCycle(s.deps); cyc != "" {
 		return nil, fmt.Errorf("dep cycle involving %s", cyc)
 	}
-	for id := range s.pending {
+	for _, t := range tasks {
+		id := t.ID
+		if _, stillPending := s.pending[id]; !stillPending {
+			continue
+		}
 		if len(s.deps[id]) == 0 {
 			s.enqueueLocked(id)
 		}
@@ -164,6 +172,9 @@ func (s *Scheduler) spliceDecomposedLocked(parentID TaskID, children []*spec.Tas
 	}
 	for _, c := range children {
 		s.pending[c.ID] = c
+		if _, ok := s.order[c.ID]; !ok {
+			s.order[c.ID] = len(s.order)
+		}
 		s.deps[c.ID] = map[TaskID]struct{}{}
 		for _, d := range c.DependsOn {
 			s.deps[c.ID][d] = struct{}{}
@@ -200,14 +211,34 @@ func (s *Scheduler) spliceDecomposedLocked(parentID TaskID, children []*spec.Tas
 }
 
 func (s *Scheduler) releaseDependentsLocked(doneID TaskID) {
+	var ready []TaskID
 	for dep := range s.dependents[doneID] {
 		delete(s.deps[dep], doneID)
 		if len(s.deps[dep]) == 0 {
 			if _, stillPending := s.pending[dep]; stillPending {
-				s.enqueueLocked(dep)
+				ready = append(ready, dep)
 			}
 		}
 	}
+	s.sortByOrderLocked(ready)
+	for _, dep := range ready {
+		s.enqueueLocked(dep)
+	}
+}
+
+func (s *Scheduler) sortByOrderLocked(ids []TaskID) {
+	sort.Slice(ids, func(i, j int) bool {
+		oi, iok := s.order[ids[i]]
+		oj, jok := s.order[ids[j]]
+		switch {
+		case iok && jok && oi != oj:
+			return oi < oj
+		case iok != jok:
+			return iok
+		default:
+			return ids[i] < ids[j]
+		}
+	})
 }
 
 func (s *Scheduler) cascadeBlockLocked(id TaskID) {

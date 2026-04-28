@@ -80,7 +80,7 @@ jobs:
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean
+          args: ${{ startsWith(github.ref, 'refs/tags/v') && 'release --clean' || 'release --snapshot --clean' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -106,7 +106,10 @@ jobs:
     needs: [goreleaser]
     runs-on: ubuntu-latest
     environment: npm-publish
-    if: ${{ inputs.dry_run != 'true' }}
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -137,49 +140,85 @@ jobs:
 
       - name: Publish platform packages
         if: ${{ env.NPM_TOKEN != '' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_TOKEN:       ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+          publish_pkg() {
+            local dir="$1"
+            local name version spec
+            name="$(node -p "require('./${dir}/package.json').name")"
+            version="$(node -p "require('./${dir}/package.json').version")"
+            spec="${name}@${version}"
+            if npm view "$spec" version > /dev/null 2>&1; then
+              echo "$spec already exists; skipping"
+              return 0
+            fi
+            if npm publish "$dir" --access public --provenance; then
+              return 0
+            fi
+            echo "publish with provenance failed for $spec; retrying without provenance"
+            if npm publish "$dir" --access public; then
+              return 0
+            fi
+            if npm view "$spec" version > /dev/null 2>&1; then
+              echo "$spec is visible after publish failure; treating as success"
+              return 0
+            fi
+            return 1
+          }
+
           for dir in dist/npm/aios-*; do
             [ -d "$dir" ] || continue
             echo "::group::publish $dir"
             # Platform packages are small, public, scoped. --provenance is
             # best-effort: if the registry/OIDC bridge is unavailable on
             # this runner, retry without --provenance rather than fail.
-            npm publish "$dir" --access public --provenance \
-              || npm publish "$dir" --access public
+            publish_pkg "$dir"
             echo "::endgroup::"
           done
 
       - name: Publish main package (last)
         if: ${{ env.NPM_TOKEN != '' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_TOKEN:       ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+          publish_pkg() {
+            local dir="$1"
+            local name version spec
+            name="$(node -p "require('./${dir}/package.json').name")"
+            version="$(node -p "require('./${dir}/package.json').version")"
+            spec="${name}@${version}"
+            if npm view "$spec" version > /dev/null 2>&1; then
+              echo "$spec already exists; skipping"
+              return 0
+            fi
+            if npm publish "$dir" --access public --provenance; then
+              return 0
+            fi
+            echo "publish with provenance failed for $spec; retrying without provenance"
+            if npm publish "$dir" --access public; then
+              return 0
+            fi
+            if npm view "$spec" version > /dev/null 2>&1; then
+              echo "$spec is visible after publish failure; treating as success"
+              return 0
+            fi
+            return 1
+          }
+
           # Wait briefly for the platform packages to become resolvable in
           # the registry — npm publish returns on the leader's write, but
           # the CDN fronting registry.npmjs.org can take a few seconds.
           echo "waiting 10s for registry propagation..."
           sleep 10
-          npm publish dist/npm/aios --access public --provenance \
-            || npm publish dist/npm/aios --access public
+          publish_pkg dist/npm/aios
 
       - name: Skip (no NPM_TOKEN secret)
         if: ${{ env.NPM_TOKEN == '' }}
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           echo "NPM_TOKEN secret is not set; skipping npm publish."
           echo "To enable publishing, follow docs/release-maintainers.md."
 
       - name: Verify published versions (smoke)
         if: ${{ env.NPM_TOKEN != '' }}
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           V="${{ needs.goreleaser.outputs.version }}"
