@@ -100,3 +100,36 @@ func TestRoot_NoHelpDumpOnError(t *testing.T) {
 		t.Fatalf("error output included subcommand list:\n%s", combined)
 	}
 }
+
+func TestRoot_NoHelpDumpOnFlagError(t *testing.T) {
+	dir := t.TempDir()
+	mustChdir(t, dir)
+	root := NewRootCmd()
+	root.SetArgs([]string{"run", "--no-such-flag"})
+	var out, errBuf bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errBuf)
+	_ = root.Execute()
+	combined := out.String() + errBuf.String()
+	if strings.Contains(combined, "Usage:") {
+		t.Fatalf("flag error triggered help dump:\n%s", combined)
+	}
+	if strings.Contains(combined, "Available Commands:") {
+		t.Fatalf("flag error included subcommand list:\n%s", combined)
+	}
+}
+
+func TestRoot_NoHelpDumpOnUnknownCommand(t *testing.T) {
+	dir := t.TempDir()
+	mustChdir(t, dir)
+	root := NewRootCmd()
+	root.SetArgs([]string{"notacommand"})
+	var out, errBuf bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errBuf)
+	_ = root.Execute()
+	combined := out.String() + errBuf.String()
+	if strings.Contains(combined, "Usage:") {
+		t.Fatalf("unknown command triggered help dump:\n%s", combined)
+	}
+}
