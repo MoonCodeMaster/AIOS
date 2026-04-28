@@ -184,6 +184,31 @@ func TestContinue_BareDashCBootsLatest(t *testing.T) {
 	}
 }
 
+func TestRoot_ResumeHintFiresOutsideRepo(t *testing.T) {
+	// The hint must fire even outside a git repo / AIOS repo, because v0.2
+	// users upgrading and trying `aios resume` from any directory should
+	// get the migration hint, not a misleading gate error.
+	dir := t.TempDir()
+	mustChdir(t, dir)
+	root := NewRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"resume", "task-1"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected migration hint error")
+	}
+	if !strings.Contains(err.Error(), "aios unblock") {
+		t.Errorf("error %q; want migration hint about aios unblock", err.Error())
+	}
+	// Critically: should NOT mention git or AIOS repo
+	if strings.Contains(err.Error(), "not a git repo") ||
+		strings.Contains(err.Error(), "not an AIOS repo") {
+		t.Errorf("got gate error instead of migration hint: %v", err)
+	}
+}
+
 func TestRoot_ResumeHintsAtUnblock(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
