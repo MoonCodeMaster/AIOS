@@ -21,10 +21,10 @@ func ConfigFromContext(ctx context.Context) (*config.Config, bool) {
 	return cfg, ok
 }
 
-// MustConfigFromContext returns the config stashed by gateAIOS, or an error
+// RequireConfigFromContext returns the config stashed by gateAIOS, or an error
 // if the gate did not run (programmer error — every command above gateAIOS
 // level should annotate gateLevelAIOS).
-func MustConfigFromContext(ctx context.Context) (*config.Config, error) {
+func RequireConfigFromContext(ctx context.Context) (*config.Config, error) {
 	cfg, ok := ConfigFromContext(ctx)
 	if !ok {
 		return nil, errors.New("internal: config not loaded — gate did not run")

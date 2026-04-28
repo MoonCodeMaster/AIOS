@@ -70,7 +70,7 @@ func runDuel(ctx context.Context, task string, apply bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	cfg, err := MustConfigFromContext(ctx)
+	cfg, err := RequireConfigFromContext(ctx)
 	if err != nil {
 		return err
 	}

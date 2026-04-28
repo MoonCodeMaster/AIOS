@@ -76,7 +76,7 @@ func newRunCmd() *cobra.Command {
 }
 
 func runMain(cmd *cobra.Command, args []string) error {
-	cfg, err := MustConfigFromContext(cmd.Context())
+	cfg, err := RequireConfigFromContext(cmd.Context())
 	if err != nil {
 		return err
 	}

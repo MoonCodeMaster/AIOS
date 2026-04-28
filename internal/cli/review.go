@@ -61,7 +61,7 @@ func runReview(ctx context.Context, prArg string, post bool) error {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return fmt.Errorf("aios review requires the gh CLI on PATH (https://cli.github.com)")
 	}
-	cfg, err := MustConfigFromContext(ctx)
+	cfg, err := RequireConfigFromContext(ctx)
 	if err != nil {
 		return err
 	}

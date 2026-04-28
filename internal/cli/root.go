@@ -106,7 +106,7 @@ func validateRootFlags(args []string, ship, print bool, resumeID string) error {
 // launchShip boots real engines for `aios --ship "prompt"`, runs ShipPrompt,
 // and returns the structured result.
 func launchShip(ctx context.Context, prompt string) (ShipResult, error) {
-	cfg, err := MustConfigFromContext(ctx)
+	cfg, err := RequireConfigFromContext(ctx)
 	if err != nil {
 		return ShipResult{}, err
 	}
@@ -128,7 +128,7 @@ func launchShip(ctx context.Context, prompt string) (ShipResult, error) {
 
 // launchOneShot boots real engines for `aios "prompt"`, runs runOneShot.
 func launchOneShot(ctx context.Context, prompt string) error {
-	cfg, err := MustConfigFromContext(ctx)
+	cfg, err := RequireConfigFromContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func launchOneShot(ctx context.Context, prompt string) error {
 
 // launchPrintMode boots real engines for `aios -p "prompt"`, runs runPrintMode.
 func launchPrintMode(ctx context.Context, prompt string) error {
-	cfg, err := MustConfigFromContext(ctx)
+	cfg, err := RequireConfigFromContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func launchPrintMode(ctx context.Context, prompt string) error {
 
 // launchRepl boots a Repl with real engines and stdio, then runs it.
 func launchRepl(ctx context.Context, resumeID string) error {
-	cfg, err := MustConfigFromContext(ctx)
+	cfg, err := RequireConfigFromContext(ctx)
 	if err != nil {
 		return err
 	}

@@ -128,7 +128,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 // a time; concurrent ShipPrompt calls in the same wd would race and need a
 // (beforeIDs, afterIDs) snapshot pattern inside ShipSpec.
 func inProcessShip(ctx context.Context, idea string) (AutopilotResult, error) {
-	cfg, err := MustConfigFromContext(ctx)
+	cfg, err := RequireConfigFromContext(ctx)
 	if err != nil {
 		return AutopilotResult{}, err
 	}

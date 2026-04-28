@@ -81,7 +81,7 @@ func commitSpec(wd, staging, source string) error {
 // codex's decompose prompt, writes them under .aios/tasks/, and commits
 // the result to the staging branch. Used by both ShipSpec and the REPL.
 func decomposeOnly(ctx context.Context, wd string) error {
-	cfg, err := MustConfigFromContext(ctx)
+	cfg, err := RequireConfigFromContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func shipSpecAttempt(ctx context.Context, wd string, attempt int) (ShipResult, e
 	// Decide whether to respec. Failures here never propagate as runtime
 	// errors — the original run result is authoritative; respec is best-effort.
 	if attempt < respecAttemptCap {
-		cfg, cfgErr := MustConfigFromContext(ctx)
+		cfg, cfgErr := RequireConfigFromContext(ctx)
 		if cfgErr == nil {
 			abandons, ids := collectAbandons(captured, &mu)
 			respecCfg := respecConfig{
