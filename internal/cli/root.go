@@ -12,7 +12,7 @@ import (
 )
 
 // Version is stamped by GoReleaser at build time.
-var Version = "0.3.1"
+var Version = "0.3.2"
 
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
@@ -25,6 +25,11 @@ func NewRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Apply --no-color if set.
+			if nc, _ := cmd.Flags().GetBool("no-color"); nc {
+				SetNoColor(true)
+			}
+
 			// Help, completion script generator, and shell-completion backends
 			// (__complete / __completeNoDesc — invoked by generated bash/zsh/fish
 			// scripts on every tab press) all bypass gating.
@@ -113,6 +118,11 @@ func NewRootCmd() *cobra.Command {
 	}
 	root.PersistentFlags().String("config", ".aios/config.toml", "path to AIOS config")
 	root.PersistentFlags().String("log-level", "info", "log level: debug|info|warn|error")
+	root.PersistentFlags().BoolVarP(&Quiet, "quiet", "q", false, "suppress progress output; only errors and final results")
+	root.PersistentFlags().BoolVar(&Verbose, "verbose", false, "enable debug-level output")
+	root.PersistentFlags().Bool("no-color", false, "disable colored output")
+	root.PersistentFlags().Lookup("no-color").NoOptDefVal = "true"
+	root.PersistentFlags().StringVarP(&ModelOverride, "model", "m", "", "override coder engine (claude or codex)")
 	root.Flags().StringP("continue", "c", "", "resume an REPL session (empty = latest, or pass a session ID)")
 	// NoOptDefVal makes -c (and --continue) accept being given without an
 	// argument; the sentinel "@latest" is translated by launchRepl into the
@@ -133,6 +143,9 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newLessonsCmd())
 	root.AddCommand(newReviewCmd())
 	root.AddCommand(newMCPCmd())
+	root.AddCommand(newExecCmd())
+	root.AddCommand(newCompletionCmd())
+	root.AddCommand(newResumeCmd())
 	installRootHelp(root)
 	return root
 }
@@ -251,13 +264,7 @@ func launchRepl(ctx context.Context, resumeID string) error {
 // means "no hint, proceed as normal prompt".
 func renamedCommandHint(arg string) string {
 	switch arg {
-	case "resume":
-		return "`aios resume` is now `aios unblock` — try `aios unblock <task-id>`"
 	case "ship":
-		// Bare aios with "ship" as first arg — could be ambiguous with
-		// the actual `ship` subcommand. Cobra dispatches `ship` correctly
-		// because subcommand-matching wins over RunE; we never reach this
-		// case for `aios ship "prompt"`. Keep entry empty for safety.
 		return ""
 	}
 	return ""

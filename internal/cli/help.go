@@ -9,28 +9,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// commandGroup labels a set of subcommands by their cobra Use field's first token.
 type commandGroup struct {
 	Heading string
-	Use     []string // first token of cmd.Use ("ship <prompt>" → "ship")
+	Use     []string
 }
 
-// rootGroups defines the grouping shown in `aios --help`.
-// New subcommands must be added here to appear in the grouped help; otherwise
-// they are still callable but invisible from the top-level help.
 var rootGroups = []commandGroup{
-	{Heading: "Pipeline", Use: []string{"ship", "run", "serve", "duel", "review"}},
-	{Heading: "Setup", Use: []string{"init", "doctor", "mcp"}},
+	{Heading: "Pipeline", Use: []string{"ship", "exec", "run", "serve", "duel", "review"}},
+	{Heading: "Setup", Use: []string{"init", "doctor", "mcp", "completion"}},
+	{Heading: "Session", Use: []string{"resume"}},
 	{Heading: "Inspection", Use: []string{"status", "cost", "lessons", "unblock"}},
 }
 
 var installRootHelpOnce sync.Once
 
-// installRootHelp replaces Cobra's default help template for the root command
-// with a grouped layout. Subcommand help is unaffected: Cobra propagates
-// help templates from parent → child unless the child sets its own, so the
-// template branches on `.HasParent` to fall back to the default rendering for
-// any subcommand.
 func installRootHelp(cmd *cobra.Command) {
 	installRootHelpOnce.Do(func() {
 		cobra.AddTemplateFunc("rootUsage", rootUsage)
@@ -44,42 +36,45 @@ func installRootHelp(cmd *cobra.Command) {
 
 func rootUsage(c *cobra.Command) string {
 	var b strings.Builder
-	b.WriteString("Usage:\n")
-	b.WriteString("  aios [prompt]                    Start REPL or run a one-shot prompt\n")
-	b.WriteString("  aios <command> [flags]\n\n")
 
-	// Session — flag-driven modes on the root command.
-	b.WriteString("Session:\n")
+	cBold.Fprint(&b, "Usage:\n")
+	fmt.Fprintf(&b, "  %s [prompt]                    Start REPL or run a one-shot prompt\n", cCyan.Sprint("aios"))
+	fmt.Fprintf(&b, "  %s <command> [flags]\n\n", cCyan.Sprint("aios"))
+
+	cBold.Fprint(&b, "Session:\n")
 	tw := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "  -p, --print <prompt>\tPrint pipeline output, no REPL")
-	fmt.Fprintln(tw, "      --continue [id]\tResume REPL session (latest, or by id)")
+	fmt.Fprintf(tw, "  %s\tPrint pipeline output, no REPL\n", cCyan.Sprint("-p, --print <prompt>"))
+	fmt.Fprintf(tw, "  %s\tResume REPL session (latest, or by id)\n", cCyan.Sprint("    --continue [id]"))
 	tw.Flush()
 	b.WriteString("\n")
 
 	cmds := indexByFirstToken(c.Commands())
 
 	for _, g := range rootGroups {
-		fmt.Fprintf(&b, "%s:\n", g.Heading)
+		cBold.Fprintf(&b, "%s:\n", g.Heading)
 		tw := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
 		for _, name := range g.Use {
 			sub, ok := cmds[name]
 			if !ok {
 				continue
 			}
-			fmt.Fprintf(tw, "  %s\t%s\n", sub.Use, sub.Short)
+			fmt.Fprintf(tw, "  %s\t%s\n", cCyan.Sprint(sub.Use), sub.Short)
 		}
 		tw.Flush()
 		b.WriteString("\n")
 	}
 
-	b.WriteString("Flags:\n")
+	cBold.Fprint(&b, "Flags:\n")
 	tw = tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "      --config <path>\tPath to AIOS config (default: ./.aios/config.toml)")
-	fmt.Fprintln(tw, "      --log-level <level>\tdebug | info | warn | error  (default: info)")
-	fmt.Fprintln(tw, "  -v, --version\tPrint version")
-	fmt.Fprintln(tw, "  -h, --help\tShow help")
+	fmt.Fprintf(tw, "  %s\tPath to AIOS config (default: ./.aios/config.toml)\n", cCyan.Sprint("    --config <path>"))
+	fmt.Fprintf(tw, "  %s\tdebug | info | warn | error  (default: info)\n", cCyan.Sprint("    --log-level <level>"))
+	fmt.Fprintf(tw, "  %s\tSuppress progress output\n", cCyan.Sprint("-q, --quiet"))
+	fmt.Fprintf(tw, "  %s\tEnable debug-level output\n", cCyan.Sprint("    --verbose"))
+	fmt.Fprintf(tw, "  %s\tDisable colored output\n", cCyan.Sprint("    --no-color"))
+	fmt.Fprintf(tw, "  %s\tPrint version\n", cCyan.Sprint("-v, --version"))
+	fmt.Fprintf(tw, "  %s\tShow help\n", cCyan.Sprint("-h, --help"))
 	tw.Flush()
-	b.WriteString("\nRun \"aios <command> --help\" for command-specific help.\n")
+	cDim.Fprintf(&b, "\nRun \"aios <command> --help\" for command-specific help.\n")
 	return b.String()
 }
 

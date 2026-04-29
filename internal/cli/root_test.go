@@ -184,10 +184,8 @@ func TestContinue_BareDashCBootsLatest(t *testing.T) {
 	}
 }
 
-func TestRoot_ResumeHintFiresOutsideRepo(t *testing.T) {
-	// The hint must fire even outside a git repo / AIOS repo, because v0.2
-	// users upgrading and trying `aios resume` from any directory should
-	// get the migration hint, not a misleading gate error.
+func TestRoot_ResumeSubcommandOutsideRepo(t *testing.T) {
+	// `aios resume task-1` outside a git repo should hit the gate error.
 	dir := t.TempDir()
 	mustChdir(t, dir)
 	root := NewRootCmd()
@@ -197,19 +195,14 @@ func TestRoot_ResumeHintFiresOutsideRepo(t *testing.T) {
 	root.SetArgs([]string{"resume", "task-1"})
 	err := root.Execute()
 	if err == nil {
-		t.Fatal("expected migration hint error")
+		t.Fatal("expected gate error outside repo")
 	}
-	if !strings.Contains(err.Error(), "aios unblock") {
-		t.Errorf("error %q; want migration hint about aios unblock", err.Error())
-	}
-	// Critically: should NOT mention git or AIOS repo
-	if strings.Contains(err.Error(), "not a git repo") ||
-		strings.Contains(err.Error(), "not an AIOS repo") {
-		t.Errorf("got gate error instead of migration hint: %v", err)
+	if !strings.Contains(err.Error(), "not a git repo") {
+		t.Errorf("error %q; want gate error about git repo", err.Error())
 	}
 }
 
-func TestRoot_ResumeHintsAtUnblock(t *testing.T) {
+func TestRoot_ResumeTriesToLoadSession(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
 		t.Fatal(err)
@@ -229,11 +222,12 @@ func TestRoot_ResumeHintsAtUnblock(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{"resume", "task-1"})
 	err := root.Execute()
+	// Should fail trying to load the session (not a migration hint).
 	if err == nil {
 		t.Fatal("expected error from `aios resume task-1`")
 	}
-	if !strings.Contains(err.Error(), "aios unblock") {
-		t.Errorf("error %q; want hint about aios unblock", err.Error())
+	if !strings.Contains(err.Error(), "resume") && !strings.Contains(err.Error(), "session") {
+		t.Errorf("error %q; want session-related error", err.Error())
 	}
 }
 

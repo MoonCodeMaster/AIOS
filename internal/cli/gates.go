@@ -77,5 +77,12 @@ func gateAIOS(ctx context.Context, configPath string) (context.Context, error) {
 		}
 		return ctx, fmt.Errorf("load %s: %w", path, err)
 	}
+	// Apply --model override if set.
+	if ModelOverride != "" {
+		cfg.Engines.CoderDefault = ModelOverride
+	}
 	return withConfig(ctx, cfg), nil
 }
+
+// ModelOverride is set by the --model/-m persistent flag on the root command.
+var ModelOverride string
