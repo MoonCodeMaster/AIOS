@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.3.2 — CLI UX overhaul (Codex-style)
+
+### New features
+
+- feat(cli): `aios exec <prompt>` — run the full pipeline non-interactively,
+  like `codex exec`. Supports `--json` for machine-readable JSONL output.
+  Alias: `aios e`.
+- feat(cli): `aios resume [session-id]` — list and resume previous REPL
+  sessions. `--last` continues the most recent session without a picker.
+  Replaces the old `--continue` flag as the primary resume mechanism.
+- feat(cli): `aios completion <shell>` — generate shell completion scripts
+  for bash, zsh, fish, and powershell.
+- feat(cli): `--model/-m` flag overrides the coder engine at runtime without
+  editing config.toml.
+- feat(cli): `--quiet/-q` suppresses progress output (errors and final
+  results only). `--verbose` enables debug-level output.
+- feat(cli): `--no-color` disables colored output for pipes and CI.
+
+### Improvements
+
+- feat(cli): colored output everywhere — green ✓ for success, red ✗ for
+  errors, yellow ⚠ for warnings, cyan for commands and prompts, dim for
+  secondary text. Uses `fatih/color` with automatic TTY detection.
+- feat(cli): ASCII art banner on the landing card with version display and
+  quick-start commands.
+- feat(cli): braille spinner animation (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏) in the stage ticker
+  replaces the static `↻`. Elapsed times and separators are dimmed.
+- feat(cli): REPL prompt upgraded from `> ` to colored `❯`, continuation
+  prompt from `.. ` to `· `. Welcome banner shows version and session info.
+- feat(cli): `--help` output uses bold section headers, cyan command names,
+  and dim footer text. New commands appear in their respective groups.
+
+### Migration
+
+| Before | After |
+|---|---|
+| `aios --continue id` | `aios resume id` or `aios -c id` (both work) |
+| `aios resume task-1` (v0.2 alias) | `aios unblock task-1` (unchanged) |
+
 ## v0.3.1 — REPL responsiveness & Ctrl+C
 
 ### Fixes
