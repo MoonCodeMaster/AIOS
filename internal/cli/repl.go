@@ -60,10 +60,8 @@ func (r *Repl) Run(ctx context.Context) error {
 	scanner := bufio.NewScanner(r.In)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // long pasted prompts
 
-	fmt.Fprintln(r.Out, `aios — type a requirement and press Enter. End a line with "\" or wrap in """…""" for multi-line. Ctrl+C or /exit to quit. /help for commands.`)
+	r.printWelcome()
 	for {
-		// Cancelled (Ctrl+C, SIGTERM) — exit cleanly without dropping
-		// into another readMessage call.
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -73,7 +71,7 @@ func (r *Repl) Run(ctx context.Context) error {
 		}
 		switch ParseSlash(msg) {
 		case SlashExit:
-			fmt.Fprintln(r.Out, "bye.")
+			cDim.Fprintln(r.Out, "bye. 👋")
 			return nil
 		case SlashHelp:
 			r.printHelp()
@@ -84,24 +82,33 @@ func (r *Repl) Run(ctx context.Context) error {
 		case SlashClear:
 			r.session.Turns = nil
 			_ = r.session.Save()
-			fmt.Fprintln(r.Out, "session cleared.")
+			printSuccess(r.Out, "Session cleared.")
 			continue
 		case SlashShip:
 			return r.ship(ctx)
 		case SlashUnknown:
-			fmt.Fprintf(r.Out, "unknown slash command. /help for the list.\n")
+			printWarn(r.Out, "Unknown slash command. /help for the list.")
 			continue
 		}
-		// Natural-language input → run the pipeline.
 		if err := r.runTurn(ctx, msg); err != nil {
-			// On Ctrl+C the pipeline returns context.Canceled — that's
-			// not a failure to surface, just a quit. Skip the noise.
 			if ctx.Err() != nil {
 				return nil
 			}
-			fmt.Fprintf(r.Out, "turn failed: %v\n", err)
+			printError(r.Out, "turn failed: %v", err)
 		}
 	}
+}
+
+func (r *Repl) printWelcome() {
+	fmt.Fprintln(r.Out)
+	cBoldCyan.Fprintf(r.Out, "  aios")
+	cDim.Fprintf(r.Out, " v%s", Version)
+	fmt.Fprintln(r.Out)
+	cDim.Fprintln(r.Out, `  Type a requirement and press Enter. /help for commands. Ctrl+C to quit.`)
+	if len(r.session.Turns) > 0 {
+		cDim.Fprintf(r.Out, "  Resumed session %s (%d prior turns)\n", r.session.ID, len(r.session.Turns))
+	}
+	fmt.Fprintln(r.Out)
 }
 
 func (r *Repl) bootSession() error {
@@ -116,19 +123,15 @@ func (r *Repl) bootSession() error {
 			return fmt.Errorf("resume %s: %w", r.ResumeID, err)
 		}
 		r.session = s
-		fmt.Fprintf(r.Out, "resumed session %s (%d prior turns)\n", s.ID, len(s.Turns))
 		return nil
 	default:
-		// Auto-resume the latest session if any exist.
 		if _, err := os.Stat(sessionsDir); err == nil {
 			if s, err := LatestSession(sessionsDir); err == nil {
 				r.session = s
-				fmt.Fprintf(r.Out, "resumed session %s (%d prior turns)\n", s.ID, len(s.Turns))
 				return nil
 			}
 		}
 	}
-	// Fresh session.
 	id := NewSessionID()
 	r.session = &Session{
 		ID:         id,
@@ -154,7 +157,7 @@ func (r *Repl) runTurn(ctx context.Context, msg string) error {
 		prior[i] = specgen.Turn{UserMessage: t.UserMessage, FinalSpec: t.SpecAfter}
 	}
 	ticker := newStageTicker(r.Out)
-	fmt.Fprintln(r.Out, "Drafting spec with Claude + Codex in parallel — typically 30–90s.")
+	printDim(r.Out, "Drafting spec with Claude + Codex in parallel — typically 30–90s.")
 	in := specgen.Input{
 		UserRequest:       msg,
 		PriorTurns:        prior,
@@ -186,61 +189,55 @@ func (r *Repl) runTurn(ctx context.Context, msg string) error {
 		return err
 	}
 	for _, w := range out.Warnings {
-		fmt.Fprintf(r.Out, "  ! %s\n", w)
+		printWarn(r.Out, "%s", w)
 	}
 	lineCount := strings.Count(out.Final, "\n") + 1
-	fmt.Fprintf(r.Out, "Spec updated (%d lines). /show to view, /ship to implement, or refine with another message.\n", lineCount)
+	printSuccess(r.Out, "Spec updated (%d lines). %s to view, %s to implement, or refine with another message.",
+		lineCount, cCyan.Sprint("/show"), cCyan.Sprint("/ship"))
 	return nil
 }
 
 func (r *Repl) printSpec() {
 	data, err := os.ReadFile(r.session.SpecPath)
 	if err != nil {
-		fmt.Fprintf(r.Out, "no spec yet.\n")
+		printWarn(r.Out, "No spec yet.")
 		return
 	}
-	fmt.Fprintln(r.Out, "---")
+	cDim.Fprintln(r.Out, "───")
 	fmt.Fprintln(r.Out, string(data))
-	fmt.Fprintln(r.Out, "---")
+	cDim.Fprintln(r.Out, "───")
 }
 
 func (r *Repl) printHelp() {
-	fmt.Fprintln(r.Out, `input: Enter submits. End a line with "\" to continue, or wrap in """…""" for multi-line.`)
-	fmt.Fprintln(r.Out, "commands:")
-	fmt.Fprintln(r.Out, "  /show   print current spec")
-	fmt.Fprintln(r.Out, "  /clear  discard session, start fresh")
-	fmt.Fprintln(r.Out, "  /ship   hand the spec to autopilot (decompose → run → PR)")
-	fmt.Fprintln(r.Out, "  /exit   leave the REPL")
-	fmt.Fprintln(r.Out, "  /help   this list")
+	fmt.Fprintln(r.Out)
+	cDim.Fprintln(r.Out, `  Input: Enter submits. End a line with "\" to continue, or wrap in """…""" for multi-line.`)
+	fmt.Fprintln(r.Out)
+	cBold.Fprintln(r.Out, "  Commands:")
+	fmt.Fprintf(r.Out, "    %s   print current spec\n", cCyan.Sprint("/show"))
+	fmt.Fprintf(r.Out, "    %s  discard session, start fresh\n", cCyan.Sprint("/clear"))
+	fmt.Fprintf(r.Out, "    %s   hand the spec to autopilot (decompose → run → PR)\n", cCyan.Sprint("/ship"))
+	fmt.Fprintf(r.Out, "    %s   leave the REPL\n", cCyan.Sprint("/exit"))
+	fmt.Fprintf(r.Out, "    %s   this list\n", cCyan.Sprint("/help"))
+	fmt.Fprintln(r.Out)
 }
 
 func (r *Repl) ship(ctx context.Context) error {
 	if r.ShipFn == nil {
 		r.ShipFn = runAutopilotShip
 	}
-	fmt.Fprintln(r.Out, "shipping spec to autopilot…")
+	printInfo(r.Out, "🚀 Shipping spec to autopilot…")
 	return r.ShipFn(ctx, r.Wd)
 }
 
-// runAutopilotShip drives `aios run --autopilot --merge` against the spec
-// already on disk at <wd>/.aios/project.md. Equivalent to typing `aios
-// autopilot` after `aios new --auto` has run.
 func runAutopilotShip(ctx context.Context, wd string) error {
 	_, err := ShipSpec(ctx, wd)
 	return err
 }
 
 // readMessage reads one user prompt from stdin.
-//
-// A single Enter submits the line — matching the UX of codex and claude CLIs.
-// For typed multi-line input, two affordances are supported:
-//   - end a line with "\" to continue on the next line (the trailing "\" is dropped); or
-//   - open the prompt with a line containing only `"""` and close it with another `"""` line.
-//
-// A bare Enter on the primary prompt re-prompts without doing anything.
 func readMessage(s *bufio.Scanner, out io.Writer) (string, bool) {
 	for {
-		fmt.Fprint(out, "> ")
+		cCyan.Fprint(out, "❯ ")
 		if !s.Scan() {
 			return "", false
 		}
@@ -251,7 +248,7 @@ func readMessage(s *bufio.Scanner, out io.Writer) (string, bool) {
 		if strings.TrimSpace(first) == `"""` {
 			var lines []string
 			for {
-				fmt.Fprint(out, ".. ")
+				cDim.Fprint(out, "· ")
 				if !s.Scan() {
 					return strings.Join(lines, "\n"), true
 				}
@@ -265,7 +262,7 @@ func readMessage(s *bufio.Scanner, out io.Writer) (string, bool) {
 		if strings.HasSuffix(first, `\`) {
 			lines := []string{strings.TrimSuffix(first, `\`)}
 			for {
-				fmt.Fprint(out, ".. ")
+				cDim.Fprint(out, "· ")
 				if !s.Scan() {
 					return strings.Join(lines, "\n"), true
 				}

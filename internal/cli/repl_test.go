@@ -88,7 +88,7 @@ func TestReplClearDropsTurns(t *testing.T) {
 	}}
 	stdin := "first message\n\n/clear\n\n/exit\n"
 	out := runReplWith(t, wd, stdin, claude, codex)
-	if !strings.Contains(out, "session cleared.") {
+	if !strings.Contains(out, "Session cleared.") {
 		t.Fatalf("/clear did not print confirmation; got: %s", out)
 	}
 }
@@ -178,7 +178,7 @@ func TestReadMessage_BlankLineRePrompts(t *testing.T) {
 	if !ok || msg != "hello" {
 		t.Fatalf("readMessage = (%q, %v), want (%q, true)", msg, ok, "hello")
 	}
-	if got := strings.Count(out.String(), "> "); got != 3 {
+	if got := strings.Count(out.String(), "❯ "); got != 3 {
 		t.Fatalf("primary prompt count = %d, want 3 (bare-Enter re-prompts)", got)
 	}
 }
@@ -190,8 +190,8 @@ func TestReadMessage_BackslashContinuation(t *testing.T) {
 	if !ok || msg != "first\nsecond" {
 		t.Fatalf("readMessage = (%q, %v), want (%q, true)", msg, ok, "first\nsecond")
 	}
-	if !strings.Contains(out.String(), ".. ") {
-		t.Fatalf("expected continuation prompt '.. '; got: %q", out.String())
+	if !strings.Contains(out.String(), "· ") {
+		t.Fatalf("expected continuation prompt '· '; got: %q", out.String())
 	}
 }
 
