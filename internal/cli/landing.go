@@ -8,36 +8,41 @@ import (
 	"path/filepath"
 )
 
-const landingCard = `You're not in an AIOS repo.
+const banner = `
+   █████╗ ██╗ ██████╗ ███████╗
+  ██╔══██╗██║██╔═══██╗██╔════╝
+  ███████║██║██║   ██║███████╗
+  ██╔══██║██║██║   ██║╚════██║
+  ██║  ██║██║╚██████╔╝███████║
+  ╚═╝  ╚═╝╚═╝ ╚═════╝ ╚══════╝`
 
-  • Run ` + "`aios init`" + ` here to bootstrap one
-  • Or cd to an existing AIOS repo and run ` + "`aios`" + ` again
-
-Run ` + "`aios --help`" + ` for the full command list.
-`
-
-// printLandingCard writes the landing message to w. Returned for testability.
+// printLandingCard writes the landing message to w.
 func printLandingCard(w io.Writer) {
-	fmt.Fprint(w, landingCard)
+	cCyan.Fprintln(w, banner)
+	fmt.Fprintln(w)
+	cDim.Fprintf(w, "  Dual-AI project orchestrator  %s\n", cDim.Sprint("v"+Version))
+	fmt.Fprintln(w)
+	printWarn(w, "You're not in an AIOS repo.")
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  %s  Bootstrap a new project here\n", cBoldCyan.Sprint("aios init"))
+	fmt.Fprintf(w, "  %s      One-shot preflight check\n", cBoldCyan.Sprint("aios doctor"))
+	fmt.Fprintf(w, "  %s    Full command reference\n", cBoldCyan.Sprint("aios --help"))
+	fmt.Fprintln(w)
+	cDim.Fprintln(w, "  Or cd to an existing AIOS repo and run `aios` again.")
+	fmt.Fprintln(w)
 }
 
 type landingCardKey struct{}
 
-// markLandingCard puts a marker on the context indicating the landing card
-// has already been printed by PersistentPreRunE. RunE checks this and exits
-// early when set, instead of running the REPL launch logic.
 func markLandingCard(ctx context.Context) context.Context {
 	return context.WithValue(ctx, landingCardKey{}, true)
 }
 
-// landingCardPrinted reports whether markLandingCard was called for this ctx.
 func landingCardPrinted(ctx context.Context) bool {
 	v, _ := ctx.Value(landingCardKey{}).(bool)
 	return v
 }
 
-// hasAIOSConfig reports whether the current cwd has a .aios/config.toml.
-// Used by bare-aios to decide between landing card and REPL launch.
 func hasAIOSConfig() bool {
 	wd, err := os.Getwd()
 	if err != nil {
