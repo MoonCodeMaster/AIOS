@@ -13,11 +13,13 @@ func TestUnblockCmd_Registered(t *testing.T) {
 	}
 }
 
-func TestResumeCmd_Removed(t *testing.T) {
+func TestResumeCmd_Registered(t *testing.T) {
 	root := NewRootCmd()
-	for _, c := range root.Commands() {
-		if c.Name() == "resume" {
-			t.Fatal("`resume` command still registered; should be removed in v0.3")
-		}
+	cmd, _, err := root.Find([]string{"resume"})
+	if err != nil {
+		t.Fatalf("resume subcommand not registered: %v", err)
+	}
+	if cmd.Name() != "resume" {
+		t.Errorf("resume.Name() = %q; want %q", cmd.Name(), "resume")
 	}
 }
