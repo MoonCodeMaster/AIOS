@@ -139,7 +139,10 @@ func TestClassifyErr(t *testing.T) {
 		{"empty stdout crash", fmt.Errorf("exec: exit 1 (stderr: )"), true},
 		// Parse failures are permanent: the model already responded and
 		// burned tokens; retrying would double-bill without recovery.
+		// Exception: if the parse failure contains a timeout indicator, it
+		// means the CLI printed a timeout message instead of valid JSON.
 		{"json parse on non-empty", fmt.Errorf("claude output parse: invalid character"), false},
+		{"json parse with timeout", fmt.Errorf("claude output parse: timeout detected in output: request has timed out"), true},
 		// Permanent patterns
 		{"auth error", fmt.Errorf("exec: exit 1 (stderr: auth token expired)"), false},
 		{"forbidden", fmt.Errorf("exec: exit 1 (stderr: forbidden)"), false},

@@ -52,14 +52,45 @@ func (c *ClaudeEngine) invoke(ctx context.Context, req InvokeRequest) (*InvokeRe
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("claude timed out after %ds — check `aios doctor` and your auth (ANTHROPIC_AUTH_TOKEN / login)", c.TimeoutSec)
 		}
-		return nil, fmt.Errorf("claude exec: %w (stderr: %s)", err, stderr.String())
+		// Include both stderr and stdout snippet in the error so that
+		// classifyErr can detect timeout messages the CLI wrote to stdout
+		// (e.g. "request has timed out") before exiting non-zero.
+		combined := stderr.String()
+		if combined == "" {
+			combined = truncateBytes(stdout.Bytes(), 200)
+		}
+		return nil, fmt.Errorf("claude exec: %w (stderr: %s)", err, combined)
 	}
 	resp, err := parseClaudeOutput(stdout.Bytes())
 	if err != nil {
+		// If stdout contains a timeout indicator but isn't valid JSON, surface
+		// the timeout so classifyErr can mark it transient and trigger a retry.
+		out := stdout.String()
+		if containsTimeout(out) {
+			return nil, fmt.Errorf("claude output parse: timeout detected in output: %s", truncateBytes(stdout.Bytes(), 200))
+		}
 		return nil, err
 	}
 	resp.ExitCode = cmd.ProcessState.ExitCode()
 	return resp, nil
+}
+
+// containsTimeout checks if the output contains timeout-related messages
+// from the claude CLI (e.g. "request has timed out", "timed out").
+func containsTimeout(s string) bool {
+	lower := bytes.ToLower([]byte(s))
+	return bytes.Contains(lower, []byte("timed out")) ||
+		bytes.Contains(lower, []byte("timeout")) ||
+		bytes.Contains(lower, []byte("request has timed out"))
+}
+
+// truncateBytes returns the first n bytes of b as a string, appending "…"
+// if truncated.
+func truncateBytes(b []byte, n int) string {
+	if len(b) <= n {
+		return string(b)
+	}
+	return string(b[:n]) + "…"
 }
 
 func buildClaudeArgs(req InvokeRequest, extra []string) []string {

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -11,9 +10,12 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/MoonCodeMaster/AIOS/internal/run"
 	"github.com/MoonCodeMaster/AIOS/internal/specgen"
+	"github.com/MoonCodeMaster/AIOS/internal/tui"
 )
 
 // Repl is one interactive AIOS session.
@@ -37,9 +39,11 @@ type Repl struct {
 	CritiqueThreshold int
 
 	session *Session
+	ctx     context.Context
+	prog    *tea.Program
 }
 
-// Run executes the REPL turn loop until /exit, EOF, or /ship.
+// Run launches the full-screen bubbletea TUI and runs the REPL loop.
 func (r *Repl) Run(ctx context.Context) error {
 	if r.LookPath == nil {
 		r.LookPath = exec.LookPath
@@ -57,58 +61,117 @@ func (r *Repl) Run(ctx context.Context) error {
 	if err := r.bootSession(); err != nil {
 		return err
 	}
-	scanner := bufio.NewScanner(r.In)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // long pasted prompts
+	r.ctx = ctx
 
-	r.printWelcome()
-	for {
-		if ctx.Err() != nil {
-			return nil
+	app := tui.New(Version, r.session.ID, len(r.session.Turns))
+	app.OnSubmit = r.onSubmit
+	app.OnShip = r.onShip
+	app.OnExit = func() {}
+
+	r.prog = tea.NewProgram(app,
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
+
+	if _, err := r.prog.Run(); err != nil {
+		return fmt.Errorf("TUI error: %w", err)
+	}
+	return nil
+}
+
+// onSubmit handles user input from the TUI.
+func (r *Repl) onSubmit(msg string) tea.Cmd {
+	switch msg {
+	case "/show":
+		return r.cmdShowSpec()
+	case "/clear":
+		r.session.Turns = nil
+		_ = r.session.Save()
+		return nil
+	}
+	// Normal message — run specgen in background.
+	return r.cmdRunTurn(msg)
+}
+
+func (r *Repl) cmdShowSpec() tea.Cmd {
+	return func() tea.Msg {
+		data, err := os.ReadFile(r.session.SpecPath)
+		if err != nil {
+			return tui.SpecDone("", 0, []string{"No spec yet."}, nil)
 		}
-		msg, ok := readMessage(scanner, r.Out)
-		if !ok {
-			return nil
-		}
-		switch ParseSlash(msg) {
-		case SlashExit:
-			cDim.Fprintln(r.Out, "bye. 👋")
-			return nil
-		case SlashHelp:
-			r.printHelp()
-			continue
-		case SlashShow:
-			r.printSpec()
-			continue
-		case SlashClear:
-			r.session.Turns = nil
-			_ = r.session.Save()
-			printSuccess(r.Out, "Session cleared.")
-			continue
-		case SlashShip:
-			return r.ship(ctx)
-		case SlashUnknown:
-			printWarn(r.Out, "Unknown slash command. /help for the list.")
-			continue
-		}
-		if err := r.runTurn(ctx, msg); err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			printError(r.Out, "turn failed: %v", err)
-		}
+		return tui.SpecDone(string(data), strings.Count(string(data), "\n")+1, nil, nil)
 	}
 }
 
-func (r *Repl) printWelcome() {
-	fmt.Fprintln(r.Out)
-	cBoldCyan.Fprintf(r.Out, "  aios")
-	cDim.Fprintf(r.Out, " v%s", Version)
-	fmt.Fprintln(r.Out)
-	cDim.Fprintln(r.Out, `  Type a requirement and press Enter. /help for commands. Ctrl+C to quit.`)
-	if len(r.session.Turns) > 0 {
-		cDim.Fprintf(r.Out, "  Resumed session %s (%d prior turns)\n", r.session.ID, len(r.session.Turns))
+func (r *Repl) cmdRunTurn(msg string) tea.Cmd {
+	return func() tea.Msg {
+		runID := time.Now().UTC().Format("2006-01-02T15-04-05")
+		rec, err := run.Open(filepath.Join(r.Wd, ".aios", "runs"), runID)
+		if err != nil {
+			return tui.SpecDone("", 0, nil, err)
+		}
+		currentSpec := ""
+		if data, err := os.ReadFile(r.session.SpecPath); err == nil {
+			currentSpec = string(data)
+		}
+		prior := make([]specgen.Turn, len(r.session.Turns))
+		for i, t := range r.session.Turns {
+			prior[i] = specgen.Turn{UserMessage: t.UserMessage, FinalSpec: t.SpecAfter}
+		}
+
+		prog := r.prog
+		in := specgen.Input{
+			UserRequest: msg,
+			PriorTurns:  prior,
+			CurrentSpec: currentSpec,
+			Claude:      r.Claude,
+			Codex:       r.Codex,
+			Recorder:    rec,
+			CritiqueEnabled:   r.CritiqueEnabled,
+			CritiqueThreshold: r.CritiqueThreshold,
+			OnStageStart: func(name string) {
+				prog.Send(tui.StageStart(name))
+			},
+			OnStageEnd: func(name string, stageErr error) {
+				prog.Send(tui.StageEnd(name, 0, stageErr))
+			},
+			OnStageProgress: func(name string, elapsed time.Duration) {
+				prog.Send(tui.StageEnd(name, elapsed, nil))
+			},
+		}
+		out, genErr := specgen.Generate(r.ctx, in)
+		if genErr != nil {
+			return tui.SpecDone("", 0, nil, genErr)
+		}
+		// Persist spec.
+		if err := os.MkdirAll(filepath.Dir(r.session.SpecPath), 0o755); err != nil {
+			return tui.SpecDone("", 0, nil, err)
+		}
+		if err := os.WriteFile(r.session.SpecPath, []byte(out.Final), 0o644); err != nil {
+			return tui.SpecDone("", 0, nil, err)
+		}
+		r.session.Turns = append(r.session.Turns, SessionTurn{
+			Timestamp: time.Now().UTC(), UserMessage: msg, SpecAfter: out.Final, RunID: runID,
+		})
+		_ = r.session.Save()
+
+		lineCount := strings.Count(out.Final, "\n") + 1
+		return tui.SpecDone(out.Final, lineCount, out.Warnings, nil)
 	}
-	fmt.Fprintln(r.Out)
+}
+
+func (r *Repl) onShip() tea.Cmd {
+	return func() tea.Msg {
+		shipFn := r.ShipFn
+		if shipFn == nil {
+			shipFn = runAutopilotShip
+		}
+		err := shipFn(r.ctx, r.Wd)
+		if err != nil {
+			return tui.SpecDone("", 0, nil, fmt.Errorf("ship failed: %w", err))
+		}
+		return tui.SpecDone("", 0, []string{"Ship complete."}, nil)
+	}
 }
 
 func (r *Repl) bootSession() error {
@@ -142,139 +205,7 @@ func (r *Repl) bootSession() error {
 	return r.session.Save()
 }
 
-func (r *Repl) runTurn(ctx context.Context, msg string) error {
-	runID := time.Now().UTC().Format("2006-01-02T15-04-05")
-	rec, err := run.Open(filepath.Join(r.Wd, ".aios", "runs"), runID)
-	if err != nil {
-		return err
-	}
-	currentSpec := ""
-	if data, err := os.ReadFile(r.session.SpecPath); err == nil {
-		currentSpec = string(data)
-	}
-	prior := make([]specgen.Turn, len(r.session.Turns))
-	for i, t := range r.session.Turns {
-		prior[i] = specgen.Turn{UserMessage: t.UserMessage, FinalSpec: t.SpecAfter}
-	}
-	ticker := newStageTicker(r.Out)
-	printDim(r.Out, "Drafting spec with Claude + Codex in parallel — typically 30–90s.")
-	in := specgen.Input{
-		UserRequest:       msg,
-		PriorTurns:        prior,
-		CurrentSpec:       currentSpec,
-		Claude:            r.Claude,
-		Codex:             r.Codex,
-		Recorder:          rec,
-		CritiqueEnabled:   r.CritiqueEnabled,
-		CritiqueThreshold: r.CritiqueThreshold,
-		OnStageStart:      ticker.Start,
-		OnStageEnd:        ticker.End,
-		OnStageProgress:   ticker.Progress,
-	}
-	out, err := specgen.Generate(ctx, in)
-	ticker.Stop()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(r.session.SpecPath), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(r.session.SpecPath, []byte(out.Final), 0o644); err != nil {
-		return err
-	}
-	r.session.Turns = append(r.session.Turns, SessionTurn{
-		Timestamp: time.Now().UTC(), UserMessage: msg, SpecAfter: out.Final, RunID: runID,
-	})
-	if err := r.session.Save(); err != nil {
-		return err
-	}
-	for _, w := range out.Warnings {
-		printWarn(r.Out, "%s", w)
-	}
-	lineCount := strings.Count(out.Final, "\n") + 1
-	printSuccess(r.Out, "Spec updated (%d lines). %s to view, %s to implement, or refine with another message.",
-		lineCount, cCyan.Sprint("/show"), cCyan.Sprint("/ship"))
-	return nil
-}
-
-func (r *Repl) printSpec() {
-	data, err := os.ReadFile(r.session.SpecPath)
-	if err != nil {
-		printWarn(r.Out, "No spec yet.")
-		return
-	}
-	cDim.Fprintln(r.Out, "───")
-	fmt.Fprintln(r.Out, string(data))
-	cDim.Fprintln(r.Out, "───")
-}
-
-func (r *Repl) printHelp() {
-	fmt.Fprintln(r.Out)
-	cDim.Fprintln(r.Out, `  Input: Enter submits. End a line with "\" to continue, or wrap in """…""" for multi-line.`)
-	fmt.Fprintln(r.Out)
-	cBold.Fprintln(r.Out, "  Commands:")
-	fmt.Fprintf(r.Out, "    %s   print current spec\n", cCyan.Sprint("/show"))
-	fmt.Fprintf(r.Out, "    %s  discard session, start fresh\n", cCyan.Sprint("/clear"))
-	fmt.Fprintf(r.Out, "    %s   hand the spec to autopilot (decompose → run → PR)\n", cCyan.Sprint("/ship"))
-	fmt.Fprintf(r.Out, "    %s   leave the REPL\n", cCyan.Sprint("/exit"))
-	fmt.Fprintf(r.Out, "    %s   this list\n", cCyan.Sprint("/help"))
-	fmt.Fprintln(r.Out)
-}
-
-func (r *Repl) ship(ctx context.Context) error {
-	if r.ShipFn == nil {
-		r.ShipFn = runAutopilotShip
-	}
-	printInfo(r.Out, "🚀 Shipping spec to autopilot…")
-	return r.ShipFn(ctx, r.Wd)
-}
-
 func runAutopilotShip(ctx context.Context, wd string) error {
 	_, err := ShipSpec(ctx, wd)
 	return err
-}
-
-// readMessage reads one user prompt from stdin.
-func readMessage(s *bufio.Scanner, out io.Writer) (string, bool) {
-	for {
-		cCyan.Fprint(out, "❯ ")
-		if !s.Scan() {
-			return "", false
-		}
-		first := s.Text()
-		if first == "" {
-			continue
-		}
-		if strings.TrimSpace(first) == `"""` {
-			var lines []string
-			for {
-				cDim.Fprint(out, "· ")
-				if !s.Scan() {
-					return strings.Join(lines, "\n"), true
-				}
-				line := s.Text()
-				if strings.TrimSpace(line) == `"""` {
-					return strings.Join(lines, "\n"), true
-				}
-				lines = append(lines, line)
-			}
-		}
-		if strings.HasSuffix(first, `\`) {
-			lines := []string{strings.TrimSuffix(first, `\`)}
-			for {
-				cDim.Fprint(out, "· ")
-				if !s.Scan() {
-					return strings.Join(lines, "\n"), true
-				}
-				cont := s.Text()
-				if strings.HasSuffix(cont, `\`) {
-					lines = append(lines, strings.TrimSuffix(cont, `\`))
-					continue
-				}
-				lines = append(lines, cont)
-				return strings.Join(lines, "\n"), true
-			}
-		}
-		return first, true
-	}
 }

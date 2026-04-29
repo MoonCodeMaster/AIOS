@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 const banner = `
@@ -16,19 +18,26 @@ const banner = `
   ██║  ██║██║╚██████╔╝███████║
   ╚═╝  ╚═╝╚═╝ ╚═════╝ ╚══════╝`
 
-// printLandingCard writes the landing message to w.
+// printLandingCard writes the landing message to w using lipgloss styling.
 func printLandingCard(w io.Writer) {
-	cCyan.Fprintln(w, banner)
+	cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	boldCyan := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	dim := lipgloss.NewStyle().Faint(true)
+	warn := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+
+	fmt.Fprintln(w, cyan.Render(banner))
 	fmt.Fprintln(w)
-	cDim.Fprintf(w, "  Dual-AI project orchestrator  %s\n", cDim.Sprint("v"+Version))
+	fmt.Fprintf(w, "  %s  %s\n",
+		boldCyan.Render("Dual-AI project orchestrator"),
+		dim.Render("v"+Version))
 	fmt.Fprintln(w)
-	printWarn(w, "You're not in an AIOS repo.")
+	fmt.Fprintf(w, "  %s You're not in an AIOS repo.\n", warn.Render("⚠"))
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "  %s  Bootstrap a new project here\n", cBoldCyan.Sprint("aios init"))
-	fmt.Fprintf(w, "  %s      One-shot preflight check\n", cBoldCyan.Sprint("aios doctor"))
-	fmt.Fprintf(w, "  %s    Full command reference\n", cBoldCyan.Sprint("aios --help"))
+	fmt.Fprintf(w, "  %s  Bootstrap a new project here\n", boldCyan.Render("aios init"))
+	fmt.Fprintf(w, "  %s      One-shot preflight check\n", boldCyan.Render("aios doctor"))
+	fmt.Fprintf(w, "  %s    Full command reference\n", boldCyan.Render("aios --help"))
 	fmt.Fprintln(w)
-	cDim.Fprintln(w, "  Or cd to an existing AIOS repo and run `aios` again.")
+	fmt.Fprintln(w, dim.Render("  Or cd to an existing AIOS repo and run `aios` again."))
 	fmt.Fprintln(w)
 }
 

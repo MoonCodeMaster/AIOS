@@ -107,10 +107,13 @@ func classifyErr(err error) bool {
 		return true
 	}
 
-	// Output-parse failures are NOT retried: the underlying call already
-	// reached the model and burned tokens; retrying double-bills without
-	// changing the upstream behavior. A truncated/garbled response is a
-	// permanent failure that must surface to the operator.
+	// Output-parse failures are generally NOT retried — the underlying call
+	// already reached the model and burned tokens. However, if the parse
+	// failure was caused by a timeout (the CLI printed a timeout message
+	// instead of valid JSON), that IS transient and should be retried.
+	if strings.Contains(msg, "output parse") && transientPatterns.MatchString(msg) {
+		return true
+	}
 
 	// Permanent patterns take priority over transient.
 	if permanentPatterns.MatchString(msg) {

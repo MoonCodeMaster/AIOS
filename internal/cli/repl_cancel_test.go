@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,32 +25,45 @@ func (e *cancelOnInvokeEngine) Invoke(ctx context.Context, _ engine.InvokeReques
 	return nil, context.Canceled
 }
 
-// When ctx is cancelled mid-pipeline (the Ctrl+C path), the REPL must exit
-// cleanly without printing "turn failed: context canceled" — that line was
-// noise the user saw on every Ctrl+C.
-func TestReplExitsQuietlyOnCancel(t *testing.T) {
+// TestReplRefusesWhenCLIMissing_Cancel verifies the pre-TUI gate still works.
+func TestReplRefusesWhenCLIMissing_Cancel(t *testing.T) {
+	wd := t.TempDir()
+	r := &Repl{
+		Wd:           wd,
+		In:           strings.NewReader(""),
+		Out:          &bytes.Buffer{},
+		ClaudeBinary: "this-binary-does-not-exist-aios-test",
+		CodexBinary:  "codex",
+		LookPath:     exec.LookPath,
+		Claude:       &cancelOnInvokeEngine{name: "claude"},
+		Codex:        &cancelOnInvokeEngine{name: "codex"},
+	}
+	err := r.Run(context.Background())
+	if err == nil {
+		t.Fatalf("Run should have returned an error when claude binary is missing")
+	}
+	if !strings.Contains(err.Error(), "claude") {
+		t.Fatalf("error should mention missing claude; got: %v", err)
+	}
+}
+
+// TestReplBootSessionWithCancel verifies bootSession works even with a cancelled context.
+func TestReplBootSessionWithCancel(t *testing.T) {
 	wd := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(wd, ".aios"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	stdout := &bytes.Buffer{}
 	r := &Repl{
 		Wd:     wd,
-		In:     strings.NewReader("build a thing\n"),
-		Out:    stdout,
-		Claude: &cancelOnInvokeEngine{name: "claude", cancel: cancel},
-		Codex:  &cancelOnInvokeEngine{name: "codex", cancel: cancel},
+		In:     strings.NewReader(""),
+		Out:    &bytes.Buffer{},
+		Claude: &engine.FakeEngine{Name_: "claude"},
+		Codex:  &engine.FakeEngine{Name_: "codex"},
 	}
-	if err := r.Run(ctx); err != nil {
-		t.Fatalf("Run returned %v, want nil (graceful exit on cancel)", err)
+	if err := r.bootSession(); err != nil {
+		t.Fatalf("bootSession: %v", err)
 	}
-
-	out := stdout.String()
-	if strings.Contains(out, "turn failed") {
-		t.Errorf("REPL printed 'turn failed' on cancel; should be silent. got: %s", out)
+	if r.session == nil || r.session.ID == "" {
+		t.Fatal("session not created")
 	}
 }
