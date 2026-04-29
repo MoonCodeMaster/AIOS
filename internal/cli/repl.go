@@ -48,6 +48,11 @@ func (r *Repl) Run(ctx context.Context) error {
 	if r.LookPath == nil {
 		r.LookPath = exec.LookPath
 	}
+	if r.ResumeID != "" {
+		if err := r.bootSession(); err != nil {
+			return err
+		}
+	}
 	if r.ClaudeBinary != "" {
 		if _, err := r.LookPath(r.ClaudeBinary); err != nil {
 			return fmt.Errorf("claude CLI not found (%s): run `aios doctor`", r.ClaudeBinary)
@@ -121,12 +126,12 @@ func (r *Repl) cmdRunTurn(msg string) tea.Cmd {
 
 		prog := r.prog
 		in := specgen.Input{
-			UserRequest: msg,
-			PriorTurns:  prior,
-			CurrentSpec: currentSpec,
-			Claude:      r.Claude,
-			Codex:       r.Codex,
-			Recorder:    rec,
+			UserRequest:       msg,
+			PriorTurns:        prior,
+			CurrentSpec:       currentSpec,
+			Claude:            r.Claude,
+			Codex:             r.Codex,
+			Recorder:          rec,
 			CritiqueEnabled:   r.CritiqueEnabled,
 			CritiqueThreshold: r.CritiqueThreshold,
 			OnStageStart: func(name string) {
