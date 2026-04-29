@@ -9,23 +9,18 @@ import (
 	"time"
 )
 
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
 // stageTicker is a thread-safe live status renderer for the dual-AI pipeline.
-//
-// In a TTY it draws a single redrawing line listing every active stage with
-// elapsed time (e.g. `↻ draft-claude 23s · draft-codex 19s`). When a stage
-// completes, the status line is cleared, a permanent ✓/✗ summary line is
-// printed, and the status redraws if other stages are still active.
-//
-// In a non-TTY (tests, pipes, CI logs) it falls back to one line per
-// start/end so output stays readable without ANSI escapes.
 type stageTicker struct {
 	out   io.Writer
 	isTTY bool
 
 	mu       sync.Mutex
-	active   map[string]time.Time // stage name -> start time
-	order    []string             // insertion order for stable rendering
-	dirty    bool                 // true if the status line was last drawn (needs clear before next plain print)
+	active   map[string]time.Time
+	order    []string
+	dirty    bool
+	frame    int
 }
 
 func newStageTicker(out io.Writer) *stageTicker {
@@ -36,7 +31,6 @@ func newStageTicker(out io.Writer) *stageTicker {
 	}
 }
 
-// Start records that a stage is now in flight.
 func (t *stageTicker) Start(name string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -46,22 +40,19 @@ func (t *stageTicker) Start(name string) {
 		t.draw()
 		return
 	}
-	fmt.Fprintf(t.out, "  · %s …\n", name)
+	cDim.Fprintf(t.out, "  · %s …\n", name)
 }
 
-// Progress is invoked periodically by the pipeline while a stage runs.
-// In TTY mode it triggers a redraw. In non-TTY mode it's a no-op — we don't
-// want a once-per-second log spam in CI.
 func (t *stageTicker) Progress(_ string, _ time.Duration) {
 	if !t.isTTY {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.frame++
 	t.draw()
 }
 
-// End records that a stage finished and prints a permanent summary line.
 func (t *stageTicker) End(name string, err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -77,17 +68,22 @@ func (t *stageTicker) End(name string, err error) {
 	}
 	rounded := elapsed.Round(time.Millisecond)
 	if err != nil {
-		fmt.Fprintf(t.out, "  ✗ %s failed in %s: %v\n", name, rounded, err)
+		fmt.Fprintf(t.out, "  %s %s %s %s\n",
+			cRed.Sprint("✗"),
+			name,
+			cRed.Sprintf("failed in %s:", rounded),
+			err)
 	} else {
-		fmt.Fprintf(t.out, "  ✓ %s (%s)\n", name, rounded)
+		fmt.Fprintf(t.out, "  %s %s %s\n",
+			cGreen.Sprint("✓"),
+			name,
+			cDim.Sprintf("(%s)", rounded))
 	}
 	if t.isTTY && len(t.active) > 0 {
 		t.draw()
 	}
 }
 
-// Stop clears any in-flight status line. Call before printing trailing
-// content (warnings, summaries) so the live line doesn't bleed into them.
 func (t *stageTicker) Stop() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -96,24 +92,21 @@ func (t *stageTicker) Stop() {
 	}
 }
 
-// draw renders the current active set as a single line. Caller must hold mu.
 func (t *stageTicker) draw() {
 	if len(t.order) == 0 {
 		t.clear()
 		return
 	}
+	spinner := cCyan.Sprint(spinnerFrames[t.frame%len(spinnerFrames)])
 	var parts []string
 	for _, n := range t.order {
 		e := time.Since(t.active[n]).Round(time.Second)
-		parts = append(parts, fmt.Sprintf("%s %s", n, formatElapsed(e)))
+		parts = append(parts, fmt.Sprintf("%s %s", n, cDim.Sprint(formatElapsed(e))))
 	}
-	// \r returns to column 0; \033[K clears to end-of-line so a shorter
-	// status line cleanly overwrites a longer previous one.
-	fmt.Fprintf(t.out, "\r\033[K  ↻ %s", strings.Join(parts, " · "))
+	fmt.Fprintf(t.out, "\r\033[K  %s %s", spinner, strings.Join(parts, cDim.Sprint(" · ")))
 	t.dirty = true
 }
 
-// clear erases the live status line. Caller must hold mu.
 func (t *stageTicker) clear() {
 	if t.dirty {
 		fmt.Fprint(t.out, "\r\033[K")
@@ -121,9 +114,6 @@ func (t *stageTicker) clear() {
 	}
 }
 
-// formatElapsed renders a duration as e.g. "23s" or "1m12s".
-// time.Duration.String() returns "1m12.000s" with the trailing zeros, which
-// is noisy for a status line — we strip the sub-second component.
 func formatElapsed(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
@@ -142,9 +132,6 @@ func removeOrdered(xs []string, x string) []string {
 	return xs
 }
 
-// isTerminal reports whether w is an interactive terminal. A non-*os.File
-// writer (bytes.Buffer in tests, pipes) returns false; an *os.File writer
-// returns true only when its mode has the character-device bit set.
 func isTerminal(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	if !ok {
