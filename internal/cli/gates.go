@@ -57,11 +57,6 @@ func gateGit(ctx context.Context, _ string) (context.Context, error) {
 }
 
 func gateAIOS(ctx context.Context, configPath string) (context.Context, error) {
-	// Layered: must be in a git repo first.
-	ctx, err := gateGit(ctx, "")
-	if err != nil {
-		return ctx, err
-	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return ctx, fmt.Errorf("cannot determine working directory: %w", err)
@@ -73,7 +68,7 @@ func gateAIOS(ctx context.Context, configPath string) (context.Context, error) {
 	cfg, err := config.Load(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			// Auto-create a default config (like Codex CLI — just works in any git repo).
+			// Auto-create a default config (like Codex CLI — just works in any directory).
 			cfg = config.Default()
 			if mkErr := os.MkdirAll(filepath.Dir(path), 0o755); mkErr != nil {
 				return ctx, fmt.Errorf("mkdir .aios: %w", mkErr)

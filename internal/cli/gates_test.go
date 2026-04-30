@@ -56,9 +56,6 @@ func TestGateGit_PassesInRepo(t *testing.T) {
 
 func TestGateAIOS_AutoCreatesConfigWhenMissing(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	mustChdir(t, dir)
 	ctx, err := gateAIOS(context.Background(), "")
 	if err != nil {
@@ -71,6 +68,20 @@ func TestGateAIOS_AutoCreatesConfigWhenMissing(t *testing.T) {
 	// Verify the file was created on disk.
 	if _, err := os.Stat(filepath.Join(dir, ".aios", "config.toml")); err != nil {
 		t.Fatalf("expected auto-created config file; got: %v", err)
+	}
+}
+
+func TestGateAIOS_WorksWithoutGitRepo(t *testing.T) {
+	dir := t.TempDir()
+	// No .git directory — should still work.
+	mustChdir(t, dir)
+	ctx, err := gateAIOS(context.Background(), "")
+	if err != nil {
+		t.Fatalf("gateAIOS should work without git repo; got err: %v", err)
+	}
+	cfg, ok := ConfigFromContext(ctx)
+	if !ok || cfg == nil {
+		t.Fatal("gateAIOS did not stash config in context")
 	}
 }
 

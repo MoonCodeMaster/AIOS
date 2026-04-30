@@ -12,6 +12,8 @@ import (
 )
 
 func TestRoot_GateAIOS_DefaultForUnannotated(t *testing.T) {
+	// `aios status` in an empty dir should auto-create config and then
+	// fail because there are no tasks — not a gate error.
 	dir := t.TempDir()
 	mustChdir(t, dir)
 
@@ -21,11 +23,12 @@ func TestRoot_GateAIOS_DefaultForUnannotated(t *testing.T) {
 	root.SetErr(io.Discard)
 	err := root.Execute()
 	if err == nil {
-		t.Fatal("expected error from `status` outside repo")
+		t.Fatal("expected error from `status` with no tasks")
 	}
-	if !strings.Contains(err.Error(), "not a git repo") &&
-		!strings.Contains(err.Error(), "not an AIOS repo") {
-		t.Fatalf("got error %q; want gate error", err.Error())
+	// Should NOT be a gate error — should be a "no tasks" error.
+	if strings.Contains(err.Error(), "not a git repo") ||
+		strings.Contains(err.Error(), "not an AIOS repo") {
+		t.Fatalf("should not get gate error; got %q", err.Error())
 	}
 }
 
@@ -187,7 +190,8 @@ func TestContinue_BareDashCBootsLatest(t *testing.T) {
 }
 
 func TestRoot_ResumeSubcommandOutsideRepo(t *testing.T) {
-	// `aios resume task-1` outside a git repo should hit the gate error.
+	// `aios resume task-1` outside a git repo should still work (auto-create config)
+	// but fail trying to load the session.
 	dir := t.TempDir()
 	mustChdir(t, dir)
 	root := NewRootCmd()
@@ -197,10 +201,11 @@ func TestRoot_ResumeSubcommandOutsideRepo(t *testing.T) {
 	root.SetArgs([]string{"resume", "task-1"})
 	err := root.Execute()
 	if err == nil {
-		t.Fatal("expected gate error outside repo")
+		t.Fatal("expected error for missing session")
 	}
-	if !strings.Contains(err.Error(), "not a git repo") {
-		t.Errorf("error %q; want gate error about git repo", err.Error())
+	// Should NOT be a git gate error.
+	if strings.Contains(err.Error(), "not a git repo") {
+		t.Errorf("should not get git gate error; got %q", err.Error())
 	}
 }
 
