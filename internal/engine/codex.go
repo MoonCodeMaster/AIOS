@@ -42,6 +42,10 @@ func (c *CodexEngine) invoke(ctx context.Context, req InvokeRequest) (*InvokeRes
 	// keep the stdout pipe open and Wait() blocks until they exit on
 	// their own — re-introducing the very hang we're fixing.
 	cmd.WaitDelay = 500 * time.Millisecond
+	// Run the engine in its own process group so a cancel reaps any MCP
+	// servers or sub-tools the CLI spawned, not just the leader.
+	setupProcessGroup(cmd)
+	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	if req.Workdir != "" {
 		cmd.Dir = req.Workdir
 	}
@@ -52,10 +56,18 @@ func (c *CodexEngine) invoke(ctx context.Context, req InvokeRequest) (*InvokeRes
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("codex timed out after %ds — check `aios doctor` and your codex auth", c.TimeoutSec)
 		}
-		return nil, fmt.Errorf("codex exec: %w (stderr: %s)", err, stderr.String())
+		combined := stderr.String()
+		if combined == "" {
+			combined = truncateBytes(stdout.Bytes(), 200)
+		}
+		return nil, fmt.Errorf("codex exec: %w (stderr: %s)", err, combined)
 	}
 	resp, err := parseCodexOutput(stdout.Bytes())
 	if err != nil {
+		out := stdout.String()
+		if containsTimeout(out) {
+			return nil, fmt.Errorf("codex output parse: timeout detected in output: %s", truncateBytes(stdout.Bytes(), 200))
+		}
 		return nil, err
 	}
 	resp.ExitCode = cmd.ProcessState.ExitCode()
@@ -76,9 +88,10 @@ func buildCodexArgs(req InvokeRequest, extra []string) []string {
 
 // codexSingleJSON is the post-T10 single-object format emitted by some Codex versions.
 type codexSingleJSON struct {
-	Type  string `json:"type"`
-	Text  string `json:"text"`
-	Usage struct {
+	Type    string `json:"type"`
+	Text    string `json:"text"`
+	Content string `json:"content"` // populated for type="error"|"fatal"
+	Usage   struct {
 		TotalTokens int `json:"total_tokens"`
 	} `json:"usage"`
 }
@@ -156,6 +169,15 @@ func parseCodexOutputNDJSON(raw []byte) (*InvokeResponse, error) {
 				DurationMs: ev.ElapsedMs,
 				Error:      ev.Error,
 			})
+		case "error", "fatal":
+			// Surface as an error so the retry layer can classify it (a
+			// codex-side timeout or rate-limit was previously swallowed as
+			// empty success).
+			msg := ev.Content
+			if msg == "" {
+				msg = ev.Error
+			}
+			return nil, fmt.Errorf("codex %s event: %s", ev.Type, msg)
 		}
 	}
 	return &InvokeResponse{
@@ -171,6 +193,15 @@ func parseCodexOutputSingle(raw []byte) (*InvokeResponse, error) {
 	var j codexSingleJSON
 	if err := json.Unmarshal(raw, &j); err != nil {
 		return nil, fmt.Errorf("codex output parse: %w", err)
+	}
+	if j.Type == "error" || j.Type == "fatal" {
+		// A type=error envelope was previously swallowed as empty success.
+		// Surface it so retry classification picks up timeouts/rate-limits.
+		msg := j.Content
+		if msg == "" {
+			msg = j.Text
+		}
+		return nil, fmt.Errorf("codex %s event: %s", j.Type, msg)
 	}
 	return &InvokeResponse{
 		Raw:         string(raw),

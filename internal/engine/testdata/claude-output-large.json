@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "result": "I've made the following changes:\n1. Added rate limiter middleware\n2. Updated tests\n3. Added config option\n\n```go\npackage middleware\n\nfunc RateLimit(max int) func(http.Handler) http.Handler {\n    return func(next http.Handler) http.Handler {\n        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n            // implementation\n            next.ServeHTTP(w, r)\n        })\n    }\n}\n```",
+  "usage": { "input_tokens": 2048, "output_tokens": 512 },
+  "session_id": "large-001",
+  "tool_calls": [
+    {
+      "name": "edit",
+      "input": { "path": "middleware/rate.go", "content": "package middleware..." },
+      "output": { "success": true }
+    },
+    {
+      "name": "mcp__github__search_code",
+      "input": { "q": "rate limit middleware" },
+      "output": { "matches": 5 },
+      "duration_ms": 120
+    }
+  ]
+}

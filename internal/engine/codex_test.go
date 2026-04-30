@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +65,114 @@ func TestParseCodexOutputNDJSON(t *testing.T) {
 	}
 }
 
+func TestParseCodexOutputNDJSON_Large(t *testing.T) {
+	raw, err := os.ReadFile("testdata/codex-output-ndjson-large.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := parseCodexOutput(raw)
+	if err != nil {
+		t.Fatalf("parseCodexOutput: %v", err)
+	}
+	if !strings.Contains(resp.Text, "implementation") {
+		t.Errorf("Text should contain 'implementation', got %q", resp.Text)
+	}
+	if resp.UsageTokens != 1280 {
+		t.Errorf("UsageTokens = %d, want 1280", resp.UsageTokens)
+	}
+	if len(resp.McpCalls) != 2 {
+		t.Errorf("McpCalls = %d, want 2", len(resp.McpCalls))
+	}
+	if len(resp.McpCalls) >= 2 {
+		if resp.McpCalls[0].Server != "github" {
+			t.Errorf("McpCalls[0].Server = %q, want github", resp.McpCalls[0].Server)
+		}
+		if resp.McpCalls[1].Server != "fs-readonly" {
+			t.Errorf("McpCalls[1].Server = %q, want fs-readonly", resp.McpCalls[1].Server)
+		}
+	}
+}
+
+func TestParseCodexOutput_MultiMcp(t *testing.T) {
+	raw, err := os.ReadFile("testdata/codex-output-multi-mcp.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := parseCodexOutput(raw)
+	if err != nil {
+		t.Fatalf("parseCodexOutput: %v", err)
+	}
+	if resp.Text != "I reviewed the PR and found 3 issues." {
+		t.Errorf("Text = %q", resp.Text)
+	}
+	if resp.UsageTokens != 800 {
+		t.Errorf("UsageTokens = %d, want 800", resp.UsageTokens)
+	}
+	if len(resp.McpCalls) != 3 {
+		t.Fatalf("McpCalls = %d, want 3", len(resp.McpCalls))
+	}
+	if resp.McpCalls[0].Tool != "get_pr" {
+		t.Errorf("McpCalls[0].Tool = %q, want get_pr", resp.McpCalls[0].Tool)
+	}
+	if resp.McpCalls[2].Server != "fs-readonly" {
+		t.Errorf("McpCalls[2].Server = %q, want fs-readonly", resp.McpCalls[2].Server)
+	}
+}
+
+func TestParseCodexOutput_EmptyResult(t *testing.T) {
+	raw, err := os.ReadFile("testdata/codex-output-empty-result.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := parseCodexOutput(raw)
+	if err != nil {
+		t.Fatalf("parseCodexOutput: %v", err)
+	}
+	if resp.Text != "" {
+		t.Errorf("Text = %q, want empty", resp.Text)
+	}
+	if resp.UsageTokens != 4 {
+		t.Errorf("UsageTokens = %d, want 4", resp.UsageTokens)
+	}
+}
+
+func TestParseCodexOutput_TimeoutText(t *testing.T) {
+	raw, err := os.ReadFile("testdata/codex-output-timeout.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// {"type":"error",...} envelopes were previously swallowed as empty
+	// success. They must surface as a real error so the retry layer can
+	// classify timeouts/rate-limits.
+	resp, err := parseCodexOutput(raw)
+	if err == nil {
+		t.Fatalf("expected error for type=error envelope, got resp=%+v", resp)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("error should contain upstream message; got: %v", err)
+	}
+	if !classifyErr(err) {
+		t.Errorf("classifyErr should mark this transient (retriable); got false for %v", err)
+	}
+}
+
+func TestParseCodexOutput_NDJSONError(t *testing.T) {
+	raw, err := os.ReadFile("testdata/codex-output-ndjson-error.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := parseCodexOutput(raw)
+	if err == nil {
+		t.Fatalf("expected error for NDJSON with error event, got resp=%+v", resp)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("error should propagate event content; got: %v", err)
+	}
+	if !classifyErr(err) {
+		t.Errorf("classifyErr should mark NDJSON timeout transient; got false for %v", err)
+	}
+}
+
 func TestCodexInvoke_RetriesTransientFailures(t *testing.T) {
 	helper := buildFakeHelper(t)
 	counterFile := filepath.Join(t.TempDir(), "counter")
@@ -121,6 +230,26 @@ func TestCodexInvoke_PermanentErrorNoRetry(t *testing.T) {
 	count := readCounter(t, counterFile)
 	if count != 1 {
 		t.Errorf("exec called %d times, want 1", count)
+	}
+}
+
+func TestCodexInvoke_ContextCancellation(t *testing.T) {
+	helper := buildFakeHelper(t)
+	counterFile := filepath.Join(t.TempDir(), "counter")
+	eng := &CodexEngine{
+		Binary: helper,
+		Retry:  RetryPolicy{MaxAttempts: 3, BaseMs: 10, Enabled: true},
+	}
+	t.Setenv("AIOS_FAKE_COUNTER", counterFile)
+	t.Setenv("AIOS_FAKE_FAIL_TIMES", "0")
+	t.Setenv("AIOS_FAKE_STDOUT", `{"type":"final","text":"ok","usage":{"total_tokens":5}}`)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	_, err := eng.Invoke(ctx, InvokeRequest{Prompt: "test"})
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
 	}
 }
 

@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
@@ -118,41 +117,25 @@ func runReview(ctx context.Context, prArg string, post bool) error {
 	}
 
 	fmt.Printf("review: PR %s — running Claude and Codex in parallel…\n", prRef)
-	var (
-		reviewA, reviewB string
-		errA, errB       error
-		wg               sync.WaitGroup
-	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		r, err := claude.Invoke(ctx, engine.InvokeRequest{Role: engine.RoleReviewer, Prompt: prompt})
-		if err != nil {
-			errA = err
-			return
-		}
-		reviewA = r.Text
-	}()
-	go func() {
-		defer wg.Done()
-		r, err := codex.Invoke(ctx, engine.InvokeRequest{Role: engine.RoleReviewer, Prompt: prompt})
-		if err != nil {
-			errB = err
-			return
-		}
-		reviewB = r.Text
-	}()
-	wg.Wait()
+	req := engine.InvokeRequest{Role: engine.RoleReviewer, Prompt: prompt}
+	ra, rb := engine.InvokeParallel(ctx, claude, codex, req, req)
+	var reviewA, reviewB string
+	if ra.Response != nil {
+		reviewA = ra.Response.Text
+	}
+	if rb.Response != nil {
+		reviewB = rb.Response.Text
+	}
 	_ = rec.WriteFile("review/claude.txt", []byte(reviewA))
 	_ = rec.WriteFile("review/codex.txt", []byte(reviewB))
 
-	if errA != nil && errB != nil {
-		return fmt.Errorf("both reviewers errored: claude=%v, codex=%v", errA, errB)
+	if ra.Err != nil && rb.Err != nil {
+		return fmt.Errorf("both reviewers errored: claude=%v, codex=%v", ra.Err, rb.Err)
 	}
 	// One-side fallback: post that side's raw review.
-	if errA != nil || errB != nil {
+	if ra.Err != nil || rb.Err != nil {
 		surviving := reviewA
-		if errA != nil {
+		if ra.Err != nil {
 			surviving = reviewB
 		}
 		fmt.Println("review: one engine errored; using the surviving review without merge.")

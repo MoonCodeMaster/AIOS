@@ -1,0 +1,8 @@
+{"type":"reasoning","content":"Let me think about the rate limiter design..."}
+{"type":"reasoning","content":"I'll use a token bucket algorithm."}
+{"type":"response","content":"Here's the implementation:\n\n"}
+{"type":"response","content":"```go\npackage main\n```"}
+{"type":"mcp_call","server":"github","tool":"get_pr","args":{"number":42},"result":{"title":"Add rate limiter","state":"open"},"elapsed_ms":85}
+{"type":"mcp_call","server":"fs-readonly","tool":"read_file","args":{"path":"go.mod"},"result":{"content":"module example"},"elapsed_ms":3}
+{"type":"usage","input_tokens":1024,"output_tokens":256}
+{"type":"done"}

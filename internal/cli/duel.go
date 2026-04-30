@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
@@ -142,37 +141,26 @@ func runDuel(ctx context.Context, task string, apply bool) error {
 		return fmt.Errorf("render duel-coder for B: %w", err)
 	}
 
+	ra, rb := engine.InvokeParallel(ctx, claude, codex,
+		engine.InvokeRequest{Role: engine.RoleCoder, Prompt: promptA, Workdir: wtA.Path},
+		engine.InvokeRequest{Role: engine.RoleCoder, Prompt: promptB, Workdir: wtB.Path},
+	)
 	var (
 		resA, resB duelResult
 		rawA, rawB string
-		wg         sync.WaitGroup
 	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		t0 := time.Now()
-		r, err := claude.Invoke(ctx, engine.InvokeRequest{Role: engine.RoleCoder, Prompt: promptA, Workdir: wtA.Path})
-		resA.duration = time.Since(t0)
-		if err != nil {
-			resA.err = err
-			return
-		}
-		rawA = r.Raw
-		resA.tokens = r.UsageTokens
-	}()
-	go func() {
-		defer wg.Done()
-		t0 := time.Now()
-		r, err := codex.Invoke(ctx, engine.InvokeRequest{Role: engine.RoleCoder, Prompt: promptB, Workdir: wtB.Path})
-		resB.duration = time.Since(t0)
-		if err != nil {
-			resB.err = err
-			return
-		}
-		rawB = r.Raw
-		resB.tokens = r.UsageTokens
-	}()
-	wg.Wait()
+	resA.duration = time.Duration(ra.DurationMs) * time.Millisecond
+	resB.duration = time.Duration(rb.DurationMs) * time.Millisecond
+	resA.err = ra.Err
+	resB.err = rb.Err
+	if ra.Response != nil {
+		rawA = ra.Response.Raw
+		resA.tokens = ra.Response.UsageTokens
+	}
+	if rb.Response != nil {
+		rawB = rb.Response.Raw
+		resB.tokens = rb.Response.UsageTokens
+	}
 
 	_ = rec.WriteFile("duel/coder-A.prompt.txt", []byte(promptA))
 	_ = rec.WriteFile("duel/coder-B.prompt.txt", []byte(promptB))

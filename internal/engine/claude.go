@@ -42,6 +42,10 @@ func (c *ClaudeEngine) invoke(ctx context.Context, req InvokeRequest) (*InvokeRe
 	// keep the stdout pipe open and Wait() blocks until they exit on
 	// their own — re-introducing the very hang we're fixing.
 	cmd.WaitDelay = 500 * time.Millisecond
+	// Run the engine in its own process group so a cancel reaps any MCP
+	// servers or sub-tools the CLI spawned, not just the leader.
+	setupProcessGroup(cmd)
+	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 	if req.Workdir != "" {
 		cmd.Dir = req.Workdir
 	}

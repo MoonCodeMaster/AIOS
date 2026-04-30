@@ -1,0 +1,29 @@
+{
+  "type": "final",
+  "text": "I reviewed the PR and found 3 issues.",
+  "usage": { "total_tokens": 800 },
+  "mcp_calls": [
+    {
+      "server": "github",
+      "tool": "get_pr",
+      "args": { "number": 42 },
+      "result": { "title": "Fix auth", "state": "open" },
+      "elapsed_ms": 95
+    },
+    {
+      "server": "github",
+      "tool": "search_code",
+      "args": { "q": "func handleLogin" },
+      "result": { "matches": 2 },
+      "elapsed_ms": 110
+    },
+    {
+      "server": "fs-readonly",
+      "tool": "read_file",
+      "args": { "path": "auth/handler.go" },
+      "result": { "content": "package auth\n..." },
+      "elapsed_ms": 5,
+      "error": ""
+    }
+  ]
+}

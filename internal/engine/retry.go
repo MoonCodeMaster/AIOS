@@ -80,7 +80,7 @@ func WithRetry(ctx context.Context, policy RetryPolicy, fn func() (*InvokeRespon
 }
 
 var transientPatterns = regexp.MustCompile(
-	`(?i)(rate limit|429|5\d\d|connection reset|EOF|timeout)`,
+	`(?i)(rate limit|429|5\d\d|connection reset|EOF|timeout|timed out)`,
 )
 
 var permanentPatterns = regexp.MustCompile(

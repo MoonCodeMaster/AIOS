@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/MoonCodeMaster/AIOS/internal/engine"
 	"github.com/MoonCodeMaster/AIOS/internal/engine/prompts"
@@ -58,49 +57,25 @@ func Run(ctx context.Context, in Input) (Output, error) {
 	if err != nil {
 		return Output{}, fmt.Errorf("render decompose-stuck: %w", err)
 	}
-	type result struct {
-		text string
-		err  error
-	}
-	var wg sync.WaitGroup
-	var resA, resB result
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		r, err := in.Claude.Invoke(ctx, engine.InvokeRequest{Role: engine.RoleCoder, Prompt: stuckPrompt})
-		if err != nil {
-			resA.err = err
-			return
-		}
-		resA.text = r.Text
-	}()
-	go func() {
-		defer wg.Done()
-		r, err := in.Codex.Invoke(ctx, engine.InvokeRequest{Role: engine.RoleCoder, Prompt: stuckPrompt})
-		if err != nil {
-			resB.err = err
-			return
-		}
-		resB.text = r.Text
-	}()
-	wg.Wait()
+	req := engine.InvokeRequest{Role: engine.RoleCoder, Prompt: stuckPrompt}
+	ra, rb := engine.InvokeParallel(ctx, in.Claude, in.Codex, req, req)
 
 	switch {
-	case resA.err != nil && resB.err != nil:
-		return Output{}, fmt.Errorf("%w: both proposals errored: claude=%v, codex=%v", ErrAbandon, resA.err, resB.err)
-	case resA.err != nil:
-		return parseAndStamp(in.Parent, resB.text, false)
-	case resB.err != nil:
-		return parseAndStamp(in.Parent, resA.text, false)
+	case ra.Err != nil && rb.Err != nil:
+		return Output{}, fmt.Errorf("%w: both proposals errored: claude=%v, codex=%v", ErrAbandon, ra.Err, rb.Err)
+	case ra.Err != nil:
+		return parseAndStamp(in.Parent, rb.Response.Text, false)
+	case rb.Err != nil:
+		return parseAndStamp(in.Parent, ra.Response.Text, false)
 	}
 
-	mergePrompt, err := renderMergePrompt(in, resA.text, resB.text)
+	mergePrompt, err := renderMergePrompt(in, ra.Response.Text, rb.Response.Text)
 	if err != nil {
 		return Output{}, fmt.Errorf("render decompose-merge: %w", err)
 	}
 	mr, mergeErr := in.Synthesizer.Invoke(ctx, engine.InvokeRequest{Role: engine.RoleReviewer, Prompt: mergePrompt})
 	if mergeErr != nil {
-		merged := unionDedupe(resA.text, resB.text, in.SynthesizerName)
+		merged := unionDedupe(ra.Response.Text, rb.Response.Text, in.SynthesizerName)
 		return parseAndStamp(in.Parent, merged, false)
 	}
 	return parseAndStamp(in.Parent, mr.Text, true)

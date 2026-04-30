@@ -1,0 +1,7 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "result": "",
+  "usage": { "input_tokens": 5, "output_tokens": 0 },
+  "session_id": "empty-001"
+}
