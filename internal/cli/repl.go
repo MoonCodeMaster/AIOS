@@ -53,16 +53,8 @@ func (r *Repl) Run(ctx context.Context) error {
 			return err
 		}
 	}
-	if r.ClaudeBinary != "" {
-		if _, err := r.LookPath(r.ClaudeBinary); err != nil {
-			return fmt.Errorf("claude CLI not found (%s): run `aios doctor`", r.ClaudeBinary)
-		}
-	}
-	if r.CodexBinary != "" {
-		if _, err := r.LookPath(r.CodexBinary); err != nil {
-			return fmt.Errorf("codex CLI not found (%s): run `aios doctor`", r.CodexBinary)
-		}
-	}
+	// Defer binary checks to first engine use — don't block startup.
+	// The TUI will show a clear error if an engine is missing when invoked.
 	if err := r.bootSession(); err != nil {
 		return err
 	}

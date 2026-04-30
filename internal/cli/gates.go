@@ -81,6 +81,7 @@ func gateAIOS(ctx context.Context, configPath string) (context.Context, error) {
 			if wErr := os.WriteFile(path, []byte(config.DefaultTOML()), 0o644); wErr != nil {
 				return ctx, fmt.Errorf("write default config: %w", wErr)
 			}
+			fmt.Fprintf(os.Stderr, "  Created %s with defaults.\n\n", path)
 		} else {
 			return ctx, fmt.Errorf("load %s: %w", path, err)
 		}

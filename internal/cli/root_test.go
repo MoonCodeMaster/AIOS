@@ -157,6 +157,9 @@ func TestContinue_NotPersistent(t *testing.T) {
 }
 
 func TestContinue_BareDashCBootsLatest(t *testing.T) {
+	// Verify that bare `-c` (no argument) is accepted by the flag parser
+	// and doesn't produce a "flag needs an argument" error.
+	// We test this by parsing only — not executing — to avoid TUI launch.
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
 		t.Fatal(err)
@@ -171,16 +174,15 @@ func TestContinue_BareDashCBootsLatest(t *testing.T) {
 	mustChdir(t, dir)
 
 	root := NewRootCmd()
-	var buf bytes.Buffer
-	root.SetOut(&buf)
-	root.SetErr(&buf)
-	root.SetIn(strings.NewReader("/exit\n"))
-	root.SetArgs([]string{"-c"}) // bare -c, no argument
-
-	err := root.Execute()
-	// REPL boot will fail (dummy binaries). The key thing: NOT a flag-parse error.
-	if err != nil && strings.Contains(err.Error(), "flag needs an argument") {
-		t.Fatalf("bare -c errored as flag-needs-argument: %v", err)
+	root.SetArgs([]string{"-c"})
+	// Only parse flags — don't execute (which would launch the TUI).
+	err := root.ParseFlags([]string{"-c"})
+	if err != nil {
+		t.Fatalf("bare -c should not produce a flag-parse error: %v", err)
+	}
+	val, _ := root.Flags().GetString("continue")
+	if val != "@latest" {
+		t.Fatalf("bare -c should set continue to @latest sentinel; got %q", val)
 	}
 }
 

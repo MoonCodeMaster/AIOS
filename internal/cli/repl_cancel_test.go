@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,28 +24,6 @@ func (e *cancelOnInvokeEngine) Invoke(ctx context.Context, _ engine.InvokeReques
 	return nil, context.Canceled
 }
 
-// TestReplRefusesWhenCLIMissing_Cancel verifies the pre-TUI gate still works.
-func TestReplRefusesWhenCLIMissing_Cancel(t *testing.T) {
-	wd := t.TempDir()
-	r := &Repl{
-		Wd:           wd,
-		In:           strings.NewReader(""),
-		Out:          &bytes.Buffer{},
-		ClaudeBinary: "this-binary-does-not-exist-aios-test",
-		CodexBinary:  "codex",
-		LookPath:     exec.LookPath,
-		Claude:       &cancelOnInvokeEngine{name: "claude"},
-		Codex:        &cancelOnInvokeEngine{name: "codex"},
-	}
-	err := r.Run(context.Background())
-	if err == nil {
-		t.Fatalf("Run should have returned an error when claude binary is missing")
-	}
-	if !strings.Contains(err.Error(), "claude") {
-		t.Fatalf("error should mention missing claude; got: %v", err)
-	}
-}
-
 // TestReplBootSessionWithCancel verifies bootSession works even with a cancelled context.
 func TestReplBootSessionWithCancel(t *testing.T) {
 	wd := t.TempDir()
@@ -65,5 +42,27 @@ func TestReplBootSessionWithCancel(t *testing.T) {
 	}
 	if r.session == nil || r.session.ID == "" {
 		t.Fatal("session not created")
+	}
+}
+
+// TestReplBootSession_CreatesSession verifies a new session is created on first boot.
+func TestReplBootSession_CreatesSession(t *testing.T) {
+	wd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(wd, ".aios", "sessions"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := &Repl{
+		Wd:     wd,
+		In:     strings.NewReader(""),
+		Out:    &bytes.Buffer{},
+		Claude: &engine.FakeEngine{Name_: "claude"},
+		Codex:  &engine.FakeEngine{Name_: "codex"},
+	}
+	if err := r.bootSession(); err != nil {
+		t.Fatalf("bootSession: %v", err)
+	}
+	// Verify session dir was created.
+	if _, err := os.Stat(filepath.Join(wd, ".aios", "sessions", r.session.ID)); err != nil {
+		t.Fatalf("session dir not created: %v", err)
 	}
 }

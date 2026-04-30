@@ -302,7 +302,6 @@ func (d *doctor) checkEngineSmoke(ctx context.Context, name string, cfg *config.
 // report writes a human-readable table to d.out. Returns true when no
 // required check failed.
 func (d *doctor) report() bool {
-	// Stable order: keep insertion order for predictable output.
 	ok := true
 	maxName := 0
 	for _, c := range d.checks {
@@ -310,11 +309,12 @@ func (d *doctor) report() bool {
 			maxName = len(c.Name)
 		}
 	}
-	fmt.Fprintln(d.out, "aios doctor")
-	fmt.Fprintln(d.out, strings.Repeat("─", 78))
+	fmt.Fprintln(d.out)
+	fmt.Fprintln(d.out, "  aios doctor")
+	fmt.Fprintln(d.out, "  "+strings.Repeat("─", 72))
 	for _, c := range d.checks {
 		pad := strings.Repeat(" ", maxName-len(c.Name))
-		line := fmt.Sprintf("[%s] %s%s", c.Status.tag(), c.Name, pad)
+		line := fmt.Sprintf("  [%s] %s%s", c.Status.tag(), c.Name, pad)
 		if c.Detail != "" {
 			line += "  " + c.Detail
 		}
@@ -323,7 +323,7 @@ func (d *doctor) report() bool {
 			ok = false
 		}
 	}
-	fmt.Fprintln(d.out, strings.Repeat("─", 78))
+	fmt.Fprintln(d.out, "  "+strings.Repeat("─", 72))
 	pass, warn, fail := 0, 0, 0
 	for _, c := range d.checks {
 		switch c.Status {
@@ -335,14 +335,15 @@ func (d *doctor) report() bool {
 			fail++
 		}
 	}
-	fmt.Fprintf(d.out, "%d pass · %d warn · %d fail\n", pass, warn, fail)
+	fmt.Fprintf(d.out, "  %d pass · %d warn · %d fail\n", pass, warn, fail)
 	if ok && warn == 0 {
-		fmt.Fprintln(d.out, "ready: all required checks passed.")
+		fmt.Fprintln(d.out, "  ready: all required checks passed.")
 	} else if ok {
-		fmt.Fprintln(d.out, "ready for `aios run`; warnings only affect autopilot/serve.")
+		fmt.Fprintln(d.out, "  ready for `aios run`; warnings only affect autopilot/serve.")
 	} else {
-		fmt.Fprintln(d.out, "blocked: fix FAIL rows above before running aios.")
+		fmt.Fprintln(d.out, "  blocked: fix FAIL rows above before running aios.")
 	}
+	fmt.Fprintln(d.out)
 	return ok
 }
 

@@ -98,7 +98,7 @@ func New(version, sessionID string, turnCount int) App {
 		glamour.WithWordWrap(78),
 	)
 
-	return App{
+	app := App{
 		width:      80,
 		height:     24,
 		input:      ta,
@@ -109,6 +109,17 @@ func New(version, sessionID string, turnCount int) App {
 		model:      "claude+codex",
 		mdRenderer: md,
 	}
+
+	// Show a welcome hint for new sessions.
+	if turnCount == 0 {
+		app.history = append(app.history, chatEntry{
+			Role: "system",
+			Content: styleDim.Render("  Type a requirement to generate a spec. Use ") +
+				styleCmd.Render("/") + styleDim.Render(" for commands."),
+		})
+	}
+
+	return app
 }
 
 // Init implements tea.Model.
@@ -187,7 +198,19 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.stageOrder = nil
 		if msg.Err != nil {
 			a.err = msg.Err
-			a.appendSystem(styleError.Render("✗") + " " + msg.Err.Error())
+			errStr := msg.Err.Error()
+			// Make common errors more actionable.
+			switch {
+			case strings.Contains(errStr, "executable file not found"):
+				a.appendSystem(styleError.Render("✗") + " Engine not found. Install the missing CLI:\n" +
+					"    " + styleCmd.Render("npm i -g @anthropic-ai/claude-code") + "  (claude)\n" +
+					"    " + styleCmd.Render("npm i -g @openai/codex") + "            (codex)\n" +
+					"  Then run " + styleCmd.Render("aios doctor") + " to verify.")
+			case strings.Contains(errStr, "timed out"):
+				a.appendSystem(styleError.Render("✗") + " Engine timed out. Check your network and API auth.")
+			default:
+				a.appendSystem(styleError.Render("✗") + " " + errStr)
+			}
 		} else {
 			for _, w := range msg.Warnings {
 				a.appendSystem(styleWarn.Render("⚠") + " " + w)

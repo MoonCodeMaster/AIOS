@@ -111,34 +111,14 @@ func TestReplBootSessionResumesSpecificID(t *testing.T) {
 	}
 }
 
-func TestReplRefusesWhenCLIMissing(t *testing.T) {
+func TestReplResumeFailsGracefully(t *testing.T) {
 	wd := t.TempDir()
 	r := &Repl{
-		Wd:           wd,
-		In:           strings.NewReader(""),
-		Out:          &bytes.Buffer{},
-		ClaudeBinary: "this-binary-does-not-exist-aios-test",
-		CodexBinary:  "codex",
-		LookPath:     exec.LookPath,
-	}
-	err := r.Run(context.Background())
-	if err == nil {
-		t.Fatalf("Run should have returned an error when claude binary is missing")
-	}
-	if !strings.Contains(err.Error(), "claude") {
-		t.Fatalf("error should mention missing claude; got: %v", err)
-	}
-}
-
-func TestReplResumeLoadsSessionBeforeCLICheck(t *testing.T) {
-	wd := t.TempDir()
-	r := &Repl{
-		Wd:           wd,
-		In:           strings.NewReader(""),
-		Out:          &bytes.Buffer{},
-		ResumeID:     "missing-session",
-		ClaudeBinary: "this-binary-does-not-exist-aios-test",
-		LookPath:     exec.LookPath,
+		Wd:       wd,
+		In:       strings.NewReader(""),
+		Out:      &bytes.Buffer{},
+		ResumeID: "missing-session",
+		LookPath: exec.LookPath,
 	}
 	err := r.Run(context.Background())
 	if err == nil {
@@ -146,9 +126,6 @@ func TestReplResumeLoadsSessionBeforeCLICheck(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "resume missing-session") {
 		t.Fatalf("error should mention the missing session; got: %v", err)
-	}
-	if strings.Contains(err.Error(), "CLI not found") {
-		t.Fatalf("missing CLI masked resume failure: %v", err)
 	}
 }
 
