@@ -174,9 +174,12 @@ func tryCodexSingleJSON(raw []byte) (string, Usage, bool) {
 
 func tryCodexNDJSON(raw []byte) (string, Usage, bool) {
 	lines := strings.Split(string(raw), "\n")
-	// Don't gate on line count — a single valid {"type":"usage",...} event
-	// is enough to identify the format. The `any` flag below is the real
-	// gate: at least one usage event must be present for us to claim NDJSON.
+	// Don't gate on line count — a single valid usage event is enough to
+	// identify the format. The `any` flag below is the real gate: at least
+	// one usage event must be present for us to claim NDJSON.
+	//
+	// Two schemas: legacy {"type":"usage","input_tokens":N,...} and
+	// codex-cli ≥0.125 {"type":"turn.completed","usage":{"input_tokens":N,...}}.
 	var u Usage
 	any := false
 	for _, ln := range lines {
@@ -188,14 +191,26 @@ func tryCodexNDJSON(raw []byte) (string, Usage, bool) {
 			Type         string `json:"type"`
 			InputTokens  int    `json:"input_tokens"`
 			OutputTokens int    `json:"output_tokens"`
+			Usage        *struct {
+				InputTokens           int `json:"input_tokens"`
+				OutputTokens          int `json:"output_tokens"`
+				ReasoningOutputTokens int `json:"reasoning_output_tokens"`
+			} `json:"usage,omitempty"`
 		}
 		if err := json.Unmarshal([]byte(ln), &ev); err != nil {
 			return "", Usage{}, false // not NDJSON
 		}
-		if ev.Type == "usage" {
+		switch ev.Type {
+		case "usage":
 			u.InputTokens += ev.InputTokens
 			u.OutputTokens += ev.OutputTokens
 			any = true
+		case "turn.completed":
+			if ev.Usage != nil {
+				u.InputTokens += ev.Usage.InputTokens
+				u.OutputTokens += ev.Usage.OutputTokens + ev.Usage.ReasoningOutputTokens
+				any = true
+			}
 		}
 	}
 	if !any {

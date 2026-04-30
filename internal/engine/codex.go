@@ -66,6 +66,14 @@ func (c *CodexEngine) invoke(ctx context.Context, req InvokeRequest) (*InvokeRes
 		}
 		return nil, err
 	}
+	// Defense-in-depth against parser drift: a CLI that exits 0 but produces
+	// no text, no tokens, and no MCP calls is never a legitimate success —
+	// it means our parser doesn't understand the CLI's event vocabulary.
+	// Without this guard, codex 0.125's schema change (item.completed /
+	// turn.completed) silently broke specgen for weeks.
+	if resp.Text == "" && resp.UsageTokens == 0 && len(resp.McpCalls) == 0 {
+		return nil, fmt.Errorf("codex returned no usable output — parser may not match installed CLI version (run `aios doctor` and check `codex --version`); raw stdout: %s", truncateBytes(stdout.Bytes(), 300))
+	}
 	resp.ExitCode = cmd.ProcessState.ExitCode()
 	return resp, nil
 }
@@ -94,7 +102,12 @@ type codexSingleJSON struct {
 	} `json:"usage"`
 }
 
-// codexEvent is one line of real Codex CLI NDJSON output.
+// codexEvent is one line of real Codex CLI NDJSON output. Two schemas are
+// supported: the legacy flat-event vocabulary (response/usage/mcp_call/error)
+// and the codex-cli ≥0.125 nested vocabulary (thread.started/turn.started/
+// item.completed/turn.completed). Drift in either is a silent disaster — the
+// parser used to return empty text + 0 tokens + nil error, which cascaded
+// through specgen drafts.
 type codexEvent struct {
 	Type         string          `json:"type"`
 	Content      string          `json:"content"`
@@ -107,6 +120,26 @@ type codexEvent struct {
 	Result       json.RawMessage `json:"result"`
 	ElapsedMs    int             `json:"elapsed_ms"`
 	Error        json.RawMessage `json:"error"`
+	// 0.125+ nested fields.
+	Item  *codexItem  `json:"item,omitempty"`
+	Usage *codexUsage `json:"usage,omitempty"`
+}
+
+// codexItem is the payload of an item.completed event in codex-cli ≥0.125.
+type codexItem struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// codexUsage is the payload of a turn.completed event in codex-cli ≥0.125.
+// Reasoning tokens are billable and are included in the total. cached_input
+// is a subset of input_tokens (already counted).
+type codexUsage struct {
+	InputTokens           int `json:"input_tokens"`
+	CachedInputTokens     int `json:"cached_input_tokens"`
+	OutputTokens          int `json:"output_tokens"`
+	ReasoningOutputTokens int `json:"reasoning_output_tokens"`
 }
 
 // isNDJSON reports whether raw contains multiple top-level JSON objects separated
@@ -159,6 +192,18 @@ func parseCodexOutputNDJSON(raw []byte) (*InvokeResponse, error) {
 			text += ev.Content
 		case "usage":
 			tokens += ev.InputTokens + ev.OutputTokens
+		case "item.completed":
+			// codex-cli ≥0.125: assistant text arrives as item.completed
+			// with item.type = "agent_message" and item.text = the message.
+			if ev.Item != nil && ev.Item.Type == "agent_message" {
+				text += ev.Item.Text
+			}
+		case "turn.completed":
+			// codex-cli ≥0.125: usage arrives nested in the turn.completed
+			// event. Cached input is a subset of input_tokens, not additive.
+			if ev.Usage != nil {
+				tokens += ev.Usage.InputTokens + ev.Usage.OutputTokens + ev.Usage.ReasoningOutputTokens
+			}
 		case "mcp_call":
 			mcpCalls = append(mcpCalls, McpCall{
 				Server:     ev.Server,

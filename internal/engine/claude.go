@@ -71,6 +71,10 @@ func (c *ClaudeEngine) invoke(ctx context.Context, req InvokeRequest) (*InvokeRe
 		}
 		return nil, err
 	}
+	// Defense-in-depth against parser drift: see codex.go for rationale.
+	if resp.Text == "" && resp.UsageTokens == 0 && len(resp.McpCalls) == 0 {
+		return nil, fmt.Errorf("claude returned no usable output — parser may not match installed CLI version (run `aios doctor` and check `claude --version`); raw stdout: %s", truncateBytes(stdout.Bytes(), 300))
+	}
 	resp.ExitCode = cmd.ProcessState.ExitCode()
 	return resp, nil
 }

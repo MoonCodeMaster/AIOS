@@ -164,3 +164,24 @@ func TestRender_TotalAppearsLast(t *testing.T) {
 		t.Errorf("render missing total / dollar sign:\n%s", out)
 	}
 }
+
+// Codex 0.125+ uses turn.completed with nested usage, not flat usage events.
+// Without this case the cost tallier ignores codex 0.125 calls entirely.
+func TestTryCodexNDJSON_v0_125(t *testing.T) {
+	raw := []byte(`{"type":"thread.started","thread_id":"x"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"type":"agent_message","text":"hi"}}
+{"type":"turn.completed","usage":{"input_tokens":1234,"output_tokens":56,"reasoning_output_tokens":7}}
+`)
+	eng, u := classify(raw)
+	if eng != "codex" {
+		t.Fatalf("engine = %q, want codex", eng)
+	}
+	if u.InputTokens != 1234 {
+		t.Errorf("InputTokens = %d, want 1234", u.InputTokens)
+	}
+	// reasoning is billable, fold into output for pricing.
+	if u.OutputTokens != 63 {
+		t.Errorf("OutputTokens = %d, want 63", u.OutputTokens)
+	}
+}

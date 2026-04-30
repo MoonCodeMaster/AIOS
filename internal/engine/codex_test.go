@@ -93,6 +93,29 @@ func TestParseCodexOutputNDJSON_Large(t *testing.T) {
 	}
 }
 
+// codex-cli 0.125.0 emits a different NDJSON schema: thread.started /
+// turn.started / item.completed (with nested item.text) / turn.completed
+// (with nested usage). The legacy parser silently dropped all of these,
+// returning empty Text and 0 tokens with no error — which then cascaded
+// through specgen as "successful but empty" drafts.
+func TestParseCodexOutput_NDJSON_v0_125(t *testing.T) {
+	raw, err := os.ReadFile("testdata/codex-output-ndjson-v0.125.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := parseCodexOutput(raw)
+	if err != nil {
+		t.Fatalf("parseCodexOutput: %v", err)
+	}
+	if resp.Text != "Blue\nGreen" {
+		t.Errorf("Text = %q, want \"Blue\\nGreen\"", resp.Text)
+	}
+	// input(16190) + output(30) + reasoning(21); cached_input is a subset of input.
+	if resp.UsageTokens != 16241 {
+		t.Errorf("UsageTokens = %d, want 16241", resp.UsageTokens)
+	}
+}
+
 func TestParseCodexOutput_MultiMcp(t *testing.T) {
 	raw, err := os.ReadFile("testdata/codex-output-multi-mcp.json")
 	if err != nil {

@@ -56,8 +56,20 @@ func Generate(ctx context.Context, in Input) (Output, error) {
 	out.DraftClaude = c.text
 	out.DraftCodex = x.text
 
-	claudeOK := c.metric.Err == ""
-	codexOK := x.metric.Err == ""
+	// A stage is OK only when it both returned no error AND produced
+	// some text. An empty-text "success" used to silently cascade — empty
+	// draft → empty merge → polish hallucinates "please paste content" —
+	// which became the user's spec. Treat empty as a failure here too.
+	claudeOK := c.metric.Err == "" && c.text != ""
+	codexOK := x.metric.Err == "" && x.text != ""
+	if c.metric.Err == "" && c.text == "" {
+		c.metric.Err = "empty output"
+		out.Stages[len(out.Stages)-2] = c.metric
+	}
+	if x.metric.Err == "" && x.text == "" {
+		x.metric.Err = "empty output"
+		out.Stages[len(out.Stages)-1] = x.metric
+	}
 
 	switch {
 	case !claudeOK && !codexOK:
