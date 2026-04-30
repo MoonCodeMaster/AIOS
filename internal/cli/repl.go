@@ -67,7 +67,6 @@ func (r *Repl) Run(ctx context.Context) error {
 
 	r.prog = tea.NewProgram(app,
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
 	)
 
 	if _, err := r.prog.Run(); err != nil {

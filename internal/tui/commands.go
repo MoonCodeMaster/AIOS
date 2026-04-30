@@ -15,6 +15,7 @@ var AllSlashCommands = []SlashCommand{
 	{Name: "model", Description: "Show current model configuration"},
 	{Name: "show", Description: "Print current spec"},
 	{Name: "ship", Description: "Hand the spec to autopilot"},
+	{Name: "copy", Description: "Copy last AI response to clipboard"},
 	{Name: "diff", Description: "Show git diff of current changes"},
 	{Name: "status", Description: "Show session config and token usage"},
 	{Name: "compact", Description: "Summarize conversation to save context"},

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -71,6 +72,9 @@ type App struct {
 
 	// Markdown renderer.
 	mdRenderer *glamour.TermRenderer
+
+	// Last AI response raw text (for /copy).
+	lastAIRaw string
 }
 
 type stageState struct {
@@ -336,6 +340,22 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 			}
 			return nil
 		}
+
+	case tea.KeyPgUp:
+		a.viewport.HalfViewUp()
+		return nil
+
+	case tea.KeyPgDown:
+		a.viewport.HalfViewDown()
+		return nil
+
+	case tea.KeyCtrlU:
+		a.viewport.HalfViewUp()
+		return nil
+
+	case tea.KeyCtrlD:
+		a.viewport.HalfViewDown()
+		return nil
 	}
 	return nil
 }
@@ -420,6 +440,16 @@ func (a *App) handleSlashCommand(val string) tea.Cmd {
 		a.appendSystem(styleDim.Render("  Compacting conversation history…"))
 		if a.OnSubmit != nil {
 			return a.OnSubmit(val)
+		}
+		return nil
+
+	case "/copy":
+		if a.lastAIRaw == "" {
+			a.appendSystem(styleWarn.Render("⚠") + " Nothing to copy.")
+		} else if err := clipboard.WriteAll(a.lastAIRaw); err != nil {
+			a.appendSystem(styleError.Render("✗") + " Copy failed: " + err.Error())
+		} else {
+			a.appendSystem(styleSuccess.Render("✓") + " Last response copied to clipboard.")
 		}
 		return nil
 
@@ -517,6 +547,7 @@ func (a App) renderFooter() string {
 			styleKey.Render("enter")+" submit",
 			styleKey.Render("/")+" commands",
 			styleKey.Render("↑↓")+" history",
+			styleKey.Render("pgup/dn")+" scroll",
 			styleKey.Render("esc")+" quit",
 		)
 	}
@@ -691,6 +722,7 @@ func (a *App) appendSystem(msg string) {
 
 // AppendAI adds a markdown-rendered AI response to the chat history.
 func (a *App) AppendAI(md string) {
+	a.lastAIRaw = md
 	rendered := md
 	if a.mdRenderer != nil {
 		if out, err := a.mdRenderer.Render(md); err == nil {
