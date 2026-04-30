@@ -250,6 +250,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
+	// During a bracketed paste, let the textarea handle all input directly.
+	if msg.Paste {
+		return nil
+	}
+
 	// Slash popup navigation.
 	if a.slashPopup {
 		switch msg.Type {

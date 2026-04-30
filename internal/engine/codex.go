@@ -63,7 +63,7 @@ func (c *CodexEngine) invoke(ctx context.Context, req InvokeRequest) (*InvokeRes
 }
 
 func buildCodexArgs(req InvokeRequest, extra []string) []string {
-	args := []string{"exec", "--json", req.Prompt}
+	args := []string{"exec", "--json", "--skip-git-repo-check", req.Prompt}
 	if req.Workdir != "" {
 		args = append(args, "--cd", req.Workdir)
 	}
