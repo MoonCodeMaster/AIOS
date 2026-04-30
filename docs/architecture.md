@@ -113,7 +113,7 @@ Cross-model pairing is enforced at config load and at runtime: a single AIOS run
 
 ### MCP (`internal/mcp`)
 
-Per-task MCP scope. Each task declares `mcp_allow: [...]` in its frontmatter; the manager intersects the task's allowlist with the run-wide `[mcp.servers]` config and renders a per-task MCP config file the engine reads. Failed MCP calls (transport error, denied by allowlist) are surfaced into the reviewer prompt so the reviewer can distinguish "coder ignored a constraint" from "coder couldn't reach external context."
+Per-task MCP scope. Each task declares `mcp_allow: [...]` in its frontmatter; the manager intersects the task's allowlist with the run-wide `[mcp.servers]` config and renders an engine-scoped MCP config file for the execution coder. Reviewers and auxiliary parallel drafting/review stages do not receive MCP configs; they consume the coder's MCP audit through prompts. Failed MCP calls (transport error, denied by allowlist) are surfaced into the reviewer prompt so the reviewer can distinguish "coder ignored a constraint" from "coder couldn't reach external context."
 
 ### Worktrees (`internal/worktree`)
 
@@ -218,7 +218,7 @@ per-issue `.aios/` workspace isolation, which is deferred.
 
 ## Process boundaries
 
-AIOS is a single Go process per run. The Claude and Codex CLIs are separate child processes invoked synchronously per coder/reviewer call. MCP servers are long-lived child processes managed by `internal/mcp.Manager` and shut down cleanly on run completion.
+AIOS is a single Go process per run. The Claude and Codex CLIs are separate child processes invoked synchronously per coder/reviewer call, and parallel helper flows use the same process-group cancellation path. Task MCP is coder-only and rendered with engine-specific server names so concurrent reviewer/drafter processes do not spawn duplicate MCP server copies. MCP servers managed by `internal/mcp.Manager` are shut down cleanly on run completion.
 
 GitHub interaction goes through the `gh` CLI as another child process — no native Go GitHub client.
 

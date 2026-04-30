@@ -93,6 +93,25 @@ AIOS_E2E=1 AIOS_BIN=$(pwd)/bin/aios go test -tags=e2e ./test/e2e/ -run TestE2E_B
 AIOS_E2E=1 AIOS_BIN=$(pwd)/bin/aios go test -tags=e2e ./test/e2e/ -run TestE2E_Refusal   -v -timeout 10m
 ```
 
+## macOS parallel engine smoke
+
+The CI workflow also runs a narrow macOS-only smoke test for the production
+engine adapters. It launches the local Claude and Codex CLIs concurrently
+through `engine.InvokeParallel` and expects both to return a tiny stub response.
+It does not perform login or proxy setup; the CLIs must already be authenticated
+or inherit valid provider environment variables.
+
+```bash
+go test -tags=macos_smoke ./internal/engine -run TestRealEnginesParallelSmoke -v -count=1 -timeout 5m
+```
+
+Optional binary overrides:
+
+```bash
+AIOS_CLAUDE_BIN=/path/to/claude AIOS_CODEX_BIN=/path/to/codex \
+  go test -tags=macos_smoke ./internal/engine -run TestRealEnginesParallelSmoke -v -count=1 -timeout 5m
+```
+
 Each test creates a temporary repo via `t.TempDir()`; no persistent state is
 left behind.
 

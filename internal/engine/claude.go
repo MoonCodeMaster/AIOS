@@ -59,11 +59,7 @@ func (c *ClaudeEngine) invoke(ctx context.Context, req InvokeRequest) (*InvokeRe
 		// Include both stderr and stdout snippet in the error so that
 		// classifyErr can detect timeout messages the CLI wrote to stdout
 		// (e.g. "request has timed out") before exiting non-zero.
-		combined := stderr.String()
-		if combined == "" {
-			combined = truncateBytes(stdout.Bytes(), 200)
-		}
-		return nil, fmt.Errorf("claude exec: %w (stderr: %s)", err, combined)
+		return nil, fmt.Errorf("claude exec: %w (%s)", err, execOutputDetail(stdout.Bytes(), stderr.Bytes()))
 	}
 	resp, err := parseClaudeOutput(stdout.Bytes())
 	if err != nil {
@@ -95,6 +91,21 @@ func truncateBytes(b []byte, n int) string {
 		return string(b)
 	}
 	return string(b[:n]) + "…"
+}
+
+func execOutputDetail(stdout, stderr []byte) string {
+	stderrText := truncateBytes(stderr, 600)
+	stdoutText := truncateBytes(stdout, 600)
+	if stderrText == "" && stdoutText == "" {
+		return "stderr: " + stdoutText
+	}
+	if stderrText == "" {
+		return "stdout: " + stdoutText
+	}
+	if stdoutText == "" {
+		return "stderr: " + stderrText
+	}
+	return "stderr: " + stderrText + "; stdout: " + stdoutText
 }
 
 func buildClaudeArgs(req InvokeRequest, extra []string) []string {

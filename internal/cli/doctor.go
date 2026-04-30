@@ -22,8 +22,9 @@ import (
 // machine" — and from a bug report to a triaged bug report.
 //
 // Exit codes:
-//   0 — everything passes (warnings allowed)
-//   1 — one or more required checks failed
+//
+//	0 — everything passes (warnings allowed)
+//	1 — one or more required checks failed
 func newDoctorCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:           "doctor",
@@ -36,6 +37,7 @@ func newDoctorCmd() *cobra.Command {
   - git ≥ 2.40 (required for worktree behaviour)
   - claude CLI on PATH and answering a tiny no-op call
   - codex  CLI on PATH and answering a tiny no-op call
+  - claude/codex CLI versions compared to parser fixture contracts (warn only)
   - gh CLI on PATH and authenticated (required for autopilot/serve)
   - git remote configured (required for autopilot/serve)
   - .aios/config.toml present and at the current schema version
@@ -124,6 +126,8 @@ func (d *doctor) runAll(ctx context.Context) {
 	d.checkGHAuth(ctx)
 	d.checkGitRemote()
 	cfg := d.checkConfig()
+	d.checkEngineOutputContract(ctx, "claude", cfg)
+	d.checkEngineOutputContract(ctx, "codex", cfg)
 	if !d.skipEngineSmoke {
 		d.checkEngineSmoke(ctx, "claude", cfg)
 		d.checkEngineSmoke(ctx, "codex", cfg)
@@ -237,20 +241,74 @@ func (d *doctor) checkConfig() *config.Config {
 	return cfg
 }
 
-func (d *doctor) checkEngineSmoke(ctx context.Context, name string, cfg *config.Config) {
+func (d *doctor) checkEngineOutputContract(ctx context.Context, name string, cfg *config.Config) {
+	contract, ok, err := engine.OutputContractFor(name)
+	if err != nil {
+		d.add(check{
+			Name:     name + " output contract",
+			Status:   statusWarn,
+			Detail:   err.Error(),
+			Required: false,
+		})
+		return
+	}
+	if !ok || contract.Version == "" {
+		return
+	}
+	binary := engineBinaryForDoctor(name, cfg)
+	if _, err := exec.LookPath(binary); err != nil {
+		return // already reported by the binary check
+	}
+	versionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(versionCtx, binary, "--version").CombinedOutput()
+	if err != nil {
+		d.add(check{
+			Name:     name + " output contract",
+			Status:   statusWarn,
+			Detail:   fmt.Sprintf("could not run %s --version: %v", binary, err),
+			Required: false,
+		})
+		return
+	}
+	installed := strings.TrimSpace(string(out))
+	if installed == contract.Version {
+		d.add(check{
+			Name:     name + " output contract",
+			Status:   statusPass,
+			Detail:   "fixtures captured with " + installed,
+			Required: false,
+		})
+		return
+	}
+	d.add(check{
+		Name:     name + " output contract",
+		Status:   statusWarn,
+		Detail:   fmt.Sprintf("installed %q; parser fixtures captured with %q", installed, contract.Version),
+		Required: false,
+	})
+}
+
+func engineBinaryForDoctor(name string, cfg *config.Config) string {
 	binary := name
-	if cfg != nil {
-		switch name {
-		case "claude":
-			if cfg.Engines.Claude.Binary != "" {
-				binary = cfg.Engines.Claude.Binary
-			}
-		case "codex":
-			if cfg.Engines.Codex.Binary != "" {
-				binary = cfg.Engines.Codex.Binary
-			}
+	if cfg == nil {
+		return binary
+	}
+	switch name {
+	case "claude":
+		if cfg.Engines.Claude.Binary != "" {
+			binary = cfg.Engines.Claude.Binary
+		}
+	case "codex":
+		if cfg.Engines.Codex.Binary != "" {
+			binary = cfg.Engines.Codex.Binary
 		}
 	}
+	return binary
+}
+
+func (d *doctor) checkEngineSmoke(ctx context.Context, name string, cfg *config.Config) {
+	binary := engineBinaryForDoctor(name, cfg)
 	// Skip the smoke if the binary check already failed — exec'ing it would
 	// just produce a redundant FAIL.
 	if _, err := exec.LookPath(binary); err != nil {

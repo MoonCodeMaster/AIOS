@@ -255,16 +255,6 @@ func runMain(cmd *cobra.Command, args []string) error {
 		}
 		defer wm.Remove(wt) // best-effort; the branch is retained for inspection
 
-		// Get MCP scope for this task (nil when task has no mcp_allow or mcpMgr is nil).
-		var mcpScope *engine.McpScope
-		if mcpMgr != nil {
-			scope, err := mcpMgr.ScopeFor(tk, filepath.Join(rec.Root(), "task-"+tk.ID))
-			if err != nil {
-				return blockedTask(id, orchestrator.CodeMcpScopeFailed, err.Error()), nil
-			}
-			mcpScope = scope
-		}
-
 		// Pick coder/reviewer engines for this task kind.
 		coderEng, reviewerEng, err := engine.PickPair(
 			tk.Kind, cfg.Engines.RolesByKind,
@@ -274,10 +264,21 @@ func runMain(cmd *cobra.Command, args []string) error {
 			return blockedTask(id, orchestrator.CodeEnginePickFailed, err.Error()), nil
 		}
 
-		// Wrap engines to auto-attach MCP scope to every Invoke call.
+		// Get an engine-isolated MCP scope for the execution coder. Reviewers
+		// and auxiliary drafting/synthesis calls consume the coder's MCP call
+		// audit in their prompts, but they do not receive --mcp-config. This
+		// avoids two CLIs spawning the same socket-binding MCP server while
+		// still keeping MCP deny-by-default and per-task opt-in.
+		var mcpScope *engine.McpScope
+		if mcpMgr != nil {
+			scope, err := mcpMgr.ScopeForEngine(tk, filepath.Join(rec.Root(), "task-"+tk.ID), coderEng.Name())
+			if err != nil {
+				return blockedTask(id, orchestrator.CodeMcpScopeFailed, err.Error()), nil
+			}
+			mcpScope = scope
+		}
 		if mcpScope != nil {
 			coderEng = withMcpScope(coderEng, mcpScope)
-			reviewerEng = withMcpScope(reviewerEng, mcpScope)
 		}
 
 		// Wrap engines so every Invoke contributes to the run-level token budget.
@@ -691,8 +692,8 @@ func printBlockSummary(rep *orchestrator.RunReport) {
 	}
 }
 
-// mcpScopedEngine wraps an Engine, auto-attaching an McpScope to every Invoke
-// call where the request doesn't already have one.
+// mcpScopedEngine wraps an Engine, auto-attaching an McpScope to execution
+// coder calls where the request doesn't already have one.
 type mcpScopedEngine struct {
 	inner engine.Engine
 	scope *engine.McpScope
@@ -700,7 +701,7 @@ type mcpScopedEngine struct {
 
 func (m *mcpScopedEngine) Name() string { return m.inner.Name() }
 func (m *mcpScopedEngine) Invoke(ctx context.Context, req engine.InvokeRequest) (*engine.InvokeResponse, error) {
-	if req.Mcp == nil {
+	if req.Role == engine.RoleCoder && req.Mcp == nil {
 		req.Mcp = m.scope
 	}
 	return m.inner.Invoke(ctx, req)

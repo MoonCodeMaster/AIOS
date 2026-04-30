@@ -173,6 +173,29 @@ func TestParseCodexOutput_NDJSONError(t *testing.T) {
 	}
 }
 
+func TestParseCodexOutput_NDJSONNestedErrorMessage(t *testing.T) {
+	raw := []byte(`{"type":"turn.started"}` + "\n" +
+		`{"type":"error","message":"usage limit reached","error":{"message":"nested fallback"}}` + "\n")
+	resp, err := parseCodexOutput(raw)
+	if err == nil {
+		t.Fatalf("expected error for NDJSON error event, got resp=%+v", resp)
+	}
+	if !strings.Contains(err.Error(), "usage limit reached") {
+		t.Errorf("error should include message field; got: %v", err)
+	}
+}
+
+func TestParseCodexOutput_SingleNestedErrorMessage(t *testing.T) {
+	raw := []byte(`{"type":"error","error":{"message":"usage limit reached"}}`)
+	resp, err := parseCodexOutput(raw)
+	if err == nil {
+		t.Fatalf("expected error for single-object error event, got resp=%+v", resp)
+	}
+	if !strings.Contains(err.Error(), "usage limit reached") {
+		t.Errorf("error should include nested message field; got: %v", err)
+	}
+}
+
 func TestCodexInvoke_RetriesTransientFailures(t *testing.T) {
 	helper := buildFakeHelper(t)
 	counterFile := filepath.Join(t.TempDir(), "counter")

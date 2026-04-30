@@ -2,8 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/MoonCodeMaster/AIOS/internal/config"
+	"github.com/MoonCodeMaster/AIOS/internal/engine"
 )
 
 func TestParseGitVersion(t *testing.T) {
@@ -81,4 +86,65 @@ func TestDoctor_AddDowngradesNonRequiredFail(t *testing.T) {
 	if d.checks[0].Status != statusWarn {
 		t.Errorf("non-required FAIL was stored as %v; want WARN", d.checks[0].Status)
 	}
+}
+
+func TestDoctorCheckEngineOutputContractPassesMatchingVersion(t *testing.T) {
+	contract, ok, err := engine.OutputContractFor("claude")
+	if err != nil {
+		t.Fatalf("OutputContractFor: %v", err)
+	}
+	if !ok {
+		t.Fatal("missing claude output contract")
+	}
+	bin := writeVersionScript(t, "claude-version", contract.Version)
+	var buf bytes.Buffer
+	d := newDoctor(&buf)
+	d.checkEngineOutputContract(t.Context(), "claude", testDoctorConfig("claude", bin))
+	if len(d.checks) != 1 {
+		t.Fatalf("checks = %d, want 1", len(d.checks))
+	}
+	if d.checks[0].Status != statusPass {
+		t.Fatalf("status = %v, want PASS (%+v)", d.checks[0].Status, d.checks[0])
+	}
+}
+
+func TestDoctorCheckEngineOutputContractWarnsOnDrift(t *testing.T) {
+	bin := writeVersionScript(t, "codex-version", "codex-cli 999.0.0")
+	var buf bytes.Buffer
+	d := newDoctor(&buf)
+	d.checkEngineOutputContract(t.Context(), "codex", testDoctorConfig("codex", bin))
+	if len(d.checks) != 1 {
+		t.Fatalf("checks = %d, want 1", len(d.checks))
+	}
+	if d.checks[0].Status != statusWarn {
+		t.Fatalf("status = %v, want WARN (%+v)", d.checks[0].Status, d.checks[0])
+	}
+	if !strings.Contains(d.checks[0].Detail, "parser fixtures captured with") {
+		t.Errorf("detail missing drift explanation: %q", d.checks[0].Detail)
+	}
+	if !d.report() {
+		t.Error("version drift warning must not fail doctor")
+	}
+}
+
+func testDoctorConfig(name, binary string) *config.Config {
+	cfg := &config.Config{}
+	switch name {
+	case "claude":
+		cfg.Engines.Claude.Binary = binary
+	case "codex":
+		cfg.Engines.Codex.Binary = binary
+	}
+	return cfg
+}
+
+func writeVersionScript(t *testing.T, name, version string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), name)
+	body := "#!/bin/sh\nprintf '%s\\n' \"$AIOS_VERSION_SCRIPT_OUTPUT\"\n"
+	if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AIOS_VERSION_SCRIPT_OUTPUT", version)
+	return p
 }

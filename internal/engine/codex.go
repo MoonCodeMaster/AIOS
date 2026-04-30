@@ -56,11 +56,7 @@ func (c *CodexEngine) invoke(ctx context.Context, req InvokeRequest) (*InvokeRes
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("codex timed out after %ds — check `aios doctor` and your codex auth", c.TimeoutSec)
 		}
-		combined := stderr.String()
-		if combined == "" {
-			combined = truncateBytes(stdout.Bytes(), 200)
-		}
-		return nil, fmt.Errorf("codex exec: %w (stderr: %s)", err, combined)
+		return nil, fmt.Errorf("codex exec: %w (%s)", err, execOutputDetail(stdout.Bytes(), stderr.Bytes()))
 	}
 	resp, err := parseCodexOutput(stdout.Bytes())
 	if err != nil {
@@ -88,9 +84,11 @@ func buildCodexArgs(req InvokeRequest, extra []string) []string {
 
 // codexSingleJSON is the post-T10 single-object format emitted by some Codex versions.
 type codexSingleJSON struct {
-	Type    string `json:"type"`
-	Text    string `json:"text"`
-	Content string `json:"content"` // populated for type="error"|"fatal"
+	Type    string          `json:"type"`
+	Text    string          `json:"text"`
+	Message string          `json:"message"`
+	Content string          `json:"content"` // populated for type="error"|"fatal"
+	Error   json.RawMessage `json:"error"`
 	Usage   struct {
 		TotalTokens int `json:"total_tokens"`
 	} `json:"usage"`
@@ -100,6 +98,7 @@ type codexSingleJSON struct {
 type codexEvent struct {
 	Type         string          `json:"type"`
 	Content      string          `json:"content"`
+	Message      string          `json:"message"`
 	InputTokens  int             `json:"input_tokens"`
 	OutputTokens int             `json:"output_tokens"`
 	Server       string          `json:"server"`
@@ -107,7 +106,7 @@ type codexEvent struct {
 	Args         json.RawMessage `json:"args"`
 	Result       json.RawMessage `json:"result"`
 	ElapsedMs    int             `json:"elapsed_ms"`
-	Error        string          `json:"error"`
+	Error        json.RawMessage `json:"error"`
 }
 
 // isNDJSON reports whether raw contains multiple top-level JSON objects separated
@@ -167,7 +166,7 @@ func parseCodexOutputNDJSON(raw []byte) (*InvokeResponse, error) {
 				ArgsJSON:   ev.Args,
 				ResultJSON: ev.Result,
 				DurationMs: ev.ElapsedMs,
-				Error:      ev.Error,
+				Error:      codexErrorText(ev.Error),
 			})
 		case "error", "fatal":
 			// Surface as an error so the retry layer can classify it (a
@@ -175,7 +174,10 @@ func parseCodexOutputNDJSON(raw []byte) (*InvokeResponse, error) {
 			// empty success).
 			msg := ev.Content
 			if msg == "" {
-				msg = ev.Error
+				msg = ev.Message
+			}
+			if msg == "" {
+				msg = codexErrorText(ev.Error)
 			}
 			return nil, fmt.Errorf("codex %s event: %s", ev.Type, msg)
 		}
@@ -198,6 +200,12 @@ func parseCodexOutputSingle(raw []byte) (*InvokeResponse, error) {
 		// A type=error envelope was previously swallowed as empty success.
 		// Surface it so retry classification picks up timeouts/rate-limits.
 		msg := j.Content
+		if msg == "" {
+			msg = j.Message
+		}
+		if msg == "" {
+			msg = codexErrorText(j.Error)
+		}
 		if msg == "" {
 			msg = j.Text
 		}
@@ -272,7 +280,7 @@ func parseCodexMcpCallsNDJSON(raw []byte) []McpCall {
 				ArgsJSON:   ev.Args,
 				ResultJSON: ev.Result,
 				DurationMs: ev.ElapsedMs,
-				Error:      ev.Error,
+				Error:      codexErrorText(ev.Error),
 			})
 		}
 	}
@@ -280,4 +288,21 @@ func parseCodexMcpCallsNDJSON(raw []byte) []McpCall {
 		return nil
 	}
 	return out
+}
+
+func codexErrorText(raw json.RawMessage) string {
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	var obj struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil && obj.Message != "" {
+		return obj.Message
+	}
+	return string(raw)
 }

@@ -29,6 +29,12 @@ func NewManager(servers map[string]config.MCPServer) *Manager {
 //
 // Returns (nil, nil) when the task opts out of MCP (empty mcp_allow).
 func (m *Manager) ScopeFor(tk *spec.Task, outDir string) (*engine.McpScope, error) {
+	return m.ScopeForEngine(tk, outDir, "")
+}
+
+// ScopeForEngine renders a per-task MCP config file isolated for one engine
+// namespace while sharing the same run-level MCP manager and validation.
+func (m *Manager) ScopeForEngine(tk *spec.Task, outDir, engineName string) (*engine.McpScope, error) {
 	if len(tk.MCPAllow) == 0 {
 		return nil, nil
 	}
@@ -46,7 +52,7 @@ func (m *Manager) ScopeFor(tk *spec.Task, outDir string) (*engine.McpScope, erro
 			return nil, fmt.Errorf("spawn %s: %w", name, err)
 		}
 	}
-	return RenderScope(m.servers, tk, outDir)
+	return RenderScopeWithOptions(m.servers, tk, outDir, ScopeOptions{Namespace: engineName})
 }
 
 func (m *Manager) spawn(name string, srv config.MCPServer) error {

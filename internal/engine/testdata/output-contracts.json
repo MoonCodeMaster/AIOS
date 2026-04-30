@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "contracts": {
+    "claude": {
+      "version": "2.1.123 (Claude Code)",
+      "version_command": "claude --version",
+      "fixtures": [
+        { "path": "claude-output-empty-result.json" },
+        { "path": "claude-output-large.json" },
+        { "path": "claude-output-sample.json" },
+        { "path": "claude-output-with-mcp.json" }
+      ]
+    },
+    "codex": {
+      "version": "codex-cli 0.125.0",
+      "version_command": "codex --version",
+      "fixtures": [
+        { "path": "codex-output-empty-result.json" },
+        { "path": "codex-output-multi-mcp.json" },
+        { "path": "codex-output-ndjson-large.json" },
+        { "path": "codex-output-ndjson.json" },
+        { "path": "codex-output-sample.json" },
+        { "path": "codex-output-with-mcp.json" }
+      ]
+    }
+  }
+}

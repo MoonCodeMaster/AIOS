@@ -488,6 +488,12 @@ servers once in `.aios/config.toml`; tasks opt in with `mcp_allow:` in their
 frontmatter. Default is deny-all — a task with no `mcp_allow` cannot reach any
 MCP server.
 
+Task MCP is attached to the execution coder only. AIOS writes an engine-scoped
+MCP config for that coder, records every MCP call, and passes MCP failures into
+the reviewer prompt. Reviewers, spec drafters, PR reviewers, and other
+auxiliary parallel stages do not receive `--mcp-config`; this prevents two
+CLIs from starting the same socket-binding MCP server for one task.
+
 ```toml
 [mcp.servers.github]
 binary = "github-mcp-server"
@@ -534,7 +540,7 @@ Known limitations in the current release:
 - MCP call failures are surfaced both in the per-round audit
   (`mcp-calls.json`) and inline in the reviewer prompt — the reviewer can
   distinguish "coder ignored a constraint" from "coder couldn't reach
-  external context."
+  external context" without spawning its own MCP server copy.
 - `aios serve` ships sequential-only. The `[concurrency]
   max_concurrent_issues` config knob exists but is clamped to 1 internally
   pending per-issue `.aios/` workspace isolation.

@@ -126,6 +126,7 @@ func TestRoot_NoHelpDumpOnUnknownCommand(t *testing.T) {
 	dir := t.TempDir()
 	mustChdir(t, dir)
 	root := NewRootCmd()
+	root.RunE = func(*cobra.Command, []string) error { return nil }
 	root.SetArgs([]string{"notacommand"})
 	var out, errBuf bytes.Buffer
 	root.SetOut(&out)

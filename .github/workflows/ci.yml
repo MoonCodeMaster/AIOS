@@ -47,3 +47,45 @@ jobs:
           set -e
           cd dist/npm/aios
           npm pack --dry-run
+
+  macos-real-engine-smoke:
+    runs-on: macos-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - name: Check auth secrets
+        id: auth
+        shell: bash
+        run: |
+          if [[ -n "${ANTHROPIC_API_KEY}" && -n "${OPENAI_API_KEY}" ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "ANTHROPIC_API_KEY and/or OPENAI_API_KEY are not set; skipping macOS real-engine smoke."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.auth.outputs.present == 'true'
+
+      - uses: actions/setup-go@v5
+        if: steps.auth.outputs.present == 'true'
+        with: { go-version: "1.26" }
+
+      - uses: actions/setup-node@v4
+        if: steps.auth.outputs.present == 'true'
+        with: { node-version: "20" }
+
+      - name: Install Claude and Codex CLIs
+        if: steps.auth.outputs.present == 'true'
+        run: npm install -g @anthropic-ai/claude-code @openai/codex
+
+      - name: Print CLI versions
+        if: steps.auth.outputs.present == 'true'
+        run: |
+          claude --version
+          codex --version
+
+      - name: Real parallel engine smoke
+        if: steps.auth.outputs.present == 'true'
+        run: go test -tags=macos_smoke ./internal/engine -run TestRealEnginesParallelSmoke -v -count=1 -timeout 5m
