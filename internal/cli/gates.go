@@ -73,9 +73,17 @@ func gateAIOS(ctx context.Context, configPath string) (context.Context, error) {
 	cfg, err := config.Load(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return ctx, errors.New("not an AIOS repo — run `aios init` here, or cd to an existing one")
+			// Auto-create a default config (like Codex CLI — just works in any git repo).
+			cfg = config.Default()
+			if mkErr := os.MkdirAll(filepath.Dir(path), 0o755); mkErr != nil {
+				return ctx, fmt.Errorf("mkdir .aios: %w", mkErr)
+			}
+			if wErr := os.WriteFile(path, []byte(config.DefaultTOML()), 0o644); wErr != nil {
+				return ctx, fmt.Errorf("write default config: %w", wErr)
+			}
+		} else {
+			return ctx, fmt.Errorf("load %s: %w", path, err)
 		}
-		return ctx, fmt.Errorf("load %s: %w", path, err)
 	}
 	// Apply --model override if set.
 	if ModelOverride != "" {

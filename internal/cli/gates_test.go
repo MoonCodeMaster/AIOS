@@ -54,21 +54,23 @@ func TestGateGit_PassesInRepo(t *testing.T) {
 	}
 }
 
-func TestGateAIOS_FailsWithoutConfig(t *testing.T) {
+func TestGateAIOS_AutoCreatesConfigWhenMissing(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	mustChdir(t, dir)
-	_, err := gateAIOS(context.Background(), "")
-	if err == nil {
-		t.Fatal("gateAIOS should fail without .aios/config.toml")
+	ctx, err := gateAIOS(context.Background(), "")
+	if err != nil {
+		t.Fatalf("gateAIOS should auto-create config; got err: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not an AIOS repo") {
-		t.Fatalf("error should say 'not an AIOS repo'; got %q", err.Error())
+	cfg, ok := ConfigFromContext(ctx)
+	if !ok || cfg == nil {
+		t.Fatal("gateAIOS did not stash config in context")
 	}
-	if !strings.Contains(err.Error(), "aios init") {
-		t.Fatalf("error should hint `aios init`; got %q", err.Error())
+	// Verify the file was created on disk.
+	if _, err := os.Stat(filepath.Join(dir, ".aios", "config.toml")); err != nil {
+		t.Fatalf("expected auto-created config file; got: %v", err)
 	}
 }
 

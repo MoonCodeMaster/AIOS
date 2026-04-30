@@ -364,3 +364,35 @@ func applyDefaults(c *Config) {
 	// CritiqueThreshold default is applied lazily by Specgen.Threshold()
 	// so a user-set zero (disable refine) is not silently overwritten.
 }
+
+// Default returns a fully-populated Config with sensible defaults.
+// Used when auto-creating config for repos that haven't run `aios init`.
+func Default() *Config {
+	c := &Config{SchemaVersion: CurrentSchemaVersion}
+	applyDefaults(c)
+	return c
+}
+
+// DefaultTOML returns the minimal TOML content for a default config file.
+func DefaultTOML() string {
+	return `schema_version = 1
+
+[project]
+base_branch    = "main"
+staging_branch = "aios/staging"
+
+[engines]
+coder_default    = "claude"
+reviewer_default = "codex"
+
+[budget]
+max_rounds_per_task       = 5
+max_tokens_per_task       = 200000
+max_wall_minutes_per_task = 30
+
+[verify]
+test_cmd  = ""
+lint_cmd  = ""
+build_cmd = ""
+`
+}

@@ -56,23 +56,6 @@ func NewRootCmd() *cobra.Command {
 				}
 			}
 
-			// Special case: bare `aios` (root command, no positional args, no
-			// pipeline-mode flags) prints a landing card instead of erroring
-			// when .aios/config.toml is missing.
-			if cmd == cmd.Root() {
-				print, _ := cmd.Flags().GetBool("print")
-				resumeID, _ := cmd.Flags().GetString("continue")
-				configChanged := cmd.Flags().Changed("config")
-				if len(args) == 0 && !print && resumeID == "" && !configChanged && !hasAIOSConfig() {
-					printLandingCard(cmd.OutOrStdout())
-					// Stash a marker on the context so RunE returns early instead
-					// of launching the REPL. Using a context flag (rather than
-					// mutating cmd.RunE) keeps the root command reusable across
-					// multiple Execute() calls — important for tests/embeddings.
-					cmd.SetContext(markLandingCard(cmd.Context()))
-					return nil
-				}
-			}
 			level := cmd.Annotations[gateAnnotation]
 			gate := selectGate(level)
 			configPath, _ := cmd.Flags().GetString("config")
@@ -84,12 +67,6 @@ func NewRootCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Landing-card path: PersistentPreRunE printed the card and stashed
-			// a marker on the context. Return early so we don't launch the REPL.
-			if landingCardPrinted(cmd.Context()) {
-				return nil
-			}
-
 			print, _ := cmd.Flags().GetBool("print")
 			resumeID, _ := cmd.Flags().GetString("continue")
 
@@ -107,6 +84,7 @@ func NewRootCmd() *cobra.Command {
 			// Renamed-command hint is handled in PersistentPreRunE so it fires
 			// before the gate (v0.2 users outside a repo still get the hint).
 			if len(args) == 0 {
+				printBanner(cmd.OutOrStdout())
 				return launchRepl(cmd.Context(), resumeID)
 			}
 			prompt := strings.Join(args, " ")
