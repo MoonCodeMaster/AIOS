@@ -13,18 +13,19 @@ import (
 )
 
 // App is the top-level bubbletea model for the AIOS interactive TUI.
-// Layout (matching Codex CLI):
+// Layout replicates the Codex CLI experience:
 //
-//	┌─────────────────────────────┐
-//	│  header (brand + session)   │
-//	│  ─────────────────────────  │
-//	│  scrollable chat history    │
-//	│  (user msgs + AI responses) │
-//	│  stage progress indicators  │
-//	│  ─────────────────────────  │
-//	│  input composer (textarea)  │
-//	│  footer (key hints)         │
-//	└─────────────────────────────┘
+//	┌─────────────────────────────────────────┐
+//	│  header (brand + model + session info)   │
+//	│  ─────────────────────────────────────── │
+//	│  scrollable chat history                 │
+//	│  (user msgs + AI responses + tool calls) │
+//	│  ─────────────────────────────────────── │
+//	│  [status indicator: Working... 5s]       │
+//	│  [slash command popup]                   │
+//	│  input composer (textarea)               │
+//	│  footer (dynamic key hints)              │
+//	└─────────────────────────────────────────┘
 type App struct {
 	// Dimensions.
 	width, height int
@@ -38,10 +39,21 @@ type App struct {
 	inputHistory []string
 	historyIdx   int
 
+	// Slash command popup.
+	slashPopup    bool
+	slashFilter   string
+	slashSelected int
+	slashMatches  []SlashCommand
+
 	// Pipeline stage tracking.
 	stages      []stageState
 	stageOrder  []string
 	shimmerTick int
+
+	// Streaming response state.
+	streaming       bool
+	streamBuf       strings.Builder
+	streamStartTime time.Time
 
 	// State.
 	waiting   bool   // true while specgen is running
@@ -49,6 +61,7 @@ type App struct {
 	turnCount int
 	version   string
 	specLines int
+	model     string
 	err       error
 
 	// Callbacks — set by the REPL wiring layer.
@@ -71,7 +84,7 @@ type stageState struct {
 // New creates a new App model.
 func New(version, sessionID string, turnCount int) App {
 	ta := textarea.New()
-	ta.Placeholder = "Type a requirement and press Enter..."
+	ta.Placeholder = "Type a message..."
 	ta.CharLimit = 0 // unlimited
 	ta.SetWidth(80)
 	ta.SetHeight(3)
@@ -93,6 +106,7 @@ func New(version, sessionID string, turnCount int) App {
 		version:    version,
 		sessionID:  sessionID,
 		turnCount:  turnCount,
+		model:      "claude+codex",
 		mdRenderer: md,
 	}
 }
@@ -117,7 +131,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.recalcLayout()
-		// Recreate markdown renderer with new width.
 		w := a.width - 4
 		if w < 40 {
 			w = 40
@@ -152,7 +165,21 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case stageProgressMsg:
-		// Just triggers a re-render (shimmer tick handles animation).
+		// Triggers re-render.
+
+	case streamChunkMsg:
+		a.streaming = true
+		a.streamBuf.WriteString(msg.Text)
+
+	case streamDoneMsg:
+		if a.streaming {
+			a.streaming = false
+			content := a.streamBuf.String()
+			a.streamBuf.Reset()
+			if content != "" {
+				a.AppendAI(content)
+			}
+		}
 
 	case specDoneMsg:
 		a.waiting = false
@@ -160,7 +187,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.stageOrder = nil
 		if msg.Err != nil {
 			a.err = msg.Err
-			a.appendSystem(styleError.Render("✗") + " turn failed: " + msg.Err.Error())
+			a.appendSystem(styleError.Render("✗") + " " + msg.Err.Error())
 		} else {
 			for _, w := range msg.Warnings {
 				a.appendSystem(styleWarn.Render("⚠") + " " + w)
@@ -170,8 +197,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"%s Spec updated (%d lines). %s to view, %s to implement, or refine.",
 				styleSuccess.Render("✓"),
 				msg.Lines,
-				styleInfo.Render("/show"),
-				styleInfo.Render("/ship"),
+				styleCmd.Render("/show"),
+				styleCmd.Render("/ship"),
 			))
 			a.turnCount++
 		}
@@ -184,6 +211,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.input, cmd = a.input.Update(msg)
 		cmds = append(cmds, cmd)
 	}
+
+	// Update slash popup state based on input.
+	a.updateSlashPopup()
+
 	a.rebuildViewport()
 	a.viewport, cmd = a.viewport.Update(msg)
 	cmds = append(cmds, cmd)
@@ -192,8 +223,45 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
+	// Slash popup navigation.
+	if a.slashPopup {
+		switch msg.Type {
+		case tea.KeyUp:
+			if a.slashSelected > 0 {
+				a.slashSelected--
+			}
+			return nil
+		case tea.KeyDown:
+			if a.slashSelected < len(a.slashMatches)-1 {
+				a.slashSelected++
+			}
+			return nil
+		case tea.KeyTab, tea.KeyEnter:
+			if len(a.slashMatches) > 0 {
+				selected := a.slashMatches[a.slashSelected]
+				a.input.SetValue("/" + selected.Name + " ")
+				a.slashPopup = false
+				a.slashMatches = nil
+			}
+			return nil
+		case tea.KeyEsc:
+			a.slashPopup = false
+			return nil
+		}
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC:
+		if a.waiting {
+			// Interrupt current operation.
+			a.waiting = false
+			a.streaming = false
+			a.streamBuf.Reset()
+			a.stages = nil
+			a.appendSystem(styleDim.Render("⎋ Interrupted."))
+			a.input.Focus()
+			return nil
+		}
 		if a.OnExit != nil {
 			a.OnExit()
 		}
@@ -201,7 +269,14 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	case tea.KeyEsc:
 		if a.waiting {
-			return nil // can't exit while waiting
+			// Interrupt.
+			a.waiting = false
+			a.streaming = false
+			a.streamBuf.Reset()
+			a.stages = nil
+			a.appendSystem(styleDim.Render("⎋ Interrupted."))
+			a.input.Focus()
+			return nil
 		}
 		if a.OnExit != nil {
 			a.OnExit()
@@ -212,8 +287,6 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if a.waiting {
 			return nil
 		}
-		// Shift+Enter or Alt+Enter for newline (handled by textarea).
-		// Plain Enter submits.
 		val := strings.TrimSpace(a.input.Value())
 		if val == "" {
 			return nil
@@ -245,51 +318,17 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (a *App) submit(val string) tea.Cmd {
+	a.slashPopup = false
+	a.slashMatches = nil
+
 	// Save to history.
 	a.inputHistory = append(a.inputHistory, val)
 	a.historyIdx = len(a.inputHistory)
 	a.input.Reset()
 
 	// Handle slash commands.
-	switch {
-	case val == "/exit" || val == "/quit":
-		if a.OnExit != nil {
-			a.OnExit()
-		}
-		return tea.Quit
-
-	case val == "/help":
-		a.appendSystem(a.renderHelp())
-		return nil
-
-	case val == "/show":
-		// Handled by the wiring layer via OnSubmit.
-		if a.OnSubmit != nil {
-			return a.OnSubmit(val)
-		}
-		return nil
-
-	case val == "/clear":
-		a.history = nil
-		a.appendSystem(styleSuccess.Render("✓") + " Session cleared.")
-		if a.OnSubmit != nil {
-			return a.OnSubmit(val)
-		}
-		return nil
-
-	case val == "/ship":
-		a.appendUser(val)
-		a.appendSystem(styleInfo.Render("🚀") + " Shipping spec to autopilot…")
-		if a.OnShip != nil {
-			return a.OnShip()
-		}
-		return nil
-
-	default:
-		if strings.HasPrefix(val, "/") {
-			a.appendSystem(styleWarn.Render("⚠") + " Unknown slash command. /help for the list.")
-			return nil
-		}
+	if strings.HasPrefix(val, "/") {
+		return a.handleSlashCommand(val)
 	}
 
 	// Normal message — run specgen.
@@ -303,18 +342,101 @@ func (a *App) submit(val string) tea.Cmd {
 	return nil
 }
 
+func (a *App) handleSlashCommand(val string) tea.Cmd {
+	parts := strings.Fields(val)
+	cmd := strings.ToLower(parts[0])
+
+	switch cmd {
+	case "/exit", "/quit":
+		if a.OnExit != nil {
+			a.OnExit()
+		}
+		return tea.Quit
+
+	case "/help":
+		a.appendSystem(a.renderHelp())
+		return nil
+
+	case "/show":
+		if a.OnSubmit != nil {
+			return a.OnSubmit(val)
+		}
+		return nil
+
+	case "/clear":
+		a.history = nil
+		a.appendSystem(styleSuccess.Render("✓") + " Conversation cleared.")
+		if a.OnSubmit != nil {
+			return a.OnSubmit(val)
+		}
+		return nil
+
+	case "/ship":
+		a.appendUser(val)
+		a.appendSystem(styleInfo.Render("🚀") + " Shipping spec to autopilot…")
+		if a.OnShip != nil {
+			return a.OnShip()
+		}
+		return nil
+
+	case "/model":
+		a.appendSystem(fmt.Sprintf("  Model: %s", styleBold.Render(a.model)))
+		return nil
+
+	case "/status":
+		a.appendSystem(a.renderStatus())
+		return nil
+
+	case "/diff":
+		if a.OnSubmit != nil {
+			return a.OnSubmit(val)
+		}
+		return nil
+
+	case "/compact":
+		a.appendSystem(styleDim.Render("  Compacting conversation history…"))
+		if a.OnSubmit != nil {
+			return a.OnSubmit(val)
+		}
+		return nil
+
+	case "/new":
+		a.history = nil
+		a.turnCount = 0
+		a.appendSystem(styleSuccess.Render("✓") + " New conversation started.")
+		return nil
+
+	case "/rename":
+		if len(parts) > 1 {
+			a.sessionID = strings.Join(parts[1:], " ")
+			a.appendSystem(styleSuccess.Render("✓") + " Session renamed to: " + a.sessionID)
+		} else {
+			a.appendSystem(styleWarn.Render("⚠") + " Usage: /rename <name>")
+		}
+		return nil
+
+	default:
+		a.appendSystem(styleWarn.Render("⚠") + " Unknown command: " + cmd + ". Type " + styleCmd.Render("/help") + " for available commands.")
+		return nil
+	}
+}
+
 // View implements tea.Model.
 func (a App) View() string {
 	header := a.renderHeader()
 	footer := a.renderFooter()
 	stages := a.renderStages()
+	status := a.renderStatusIndicator()
+	popup := a.renderSlashPopup()
 
 	// Calculate available height.
 	headerH := lipgloss.Height(header)
 	footerH := lipgloss.Height(footer)
 	stagesH := lipgloss.Height(stages)
-	inputH := 5 // textarea + border
-	chatH := a.height - headerH - footerH - stagesH - inputH - 1
+	statusH := lipgloss.Height(status)
+	popupH := lipgloss.Height(popup)
+	inputH := 5
+	chatH := a.height - headerH - footerH - stagesH - statusH - popupH - inputH - 1
 	if chatH < 3 {
 		chatH = 3
 	}
@@ -329,6 +451,12 @@ func (a App) View() string {
 	if stages != "" {
 		sections = append(sections, stages)
 	}
+	if status != "" {
+		sections = append(sections, status)
+	}
+	if popup != "" {
+		sections = append(sections, popup)
+	}
 	sections = append(sections, composer)
 	sections = append(sections, footer)
 
@@ -340,11 +468,15 @@ func (a App) View() string {
 func (a App) renderHeader() string {
 	brand := styleBoldCyan.Render("  aios")
 	ver := styleDim.Render(" v" + a.version)
+	model := styleDim.Render(" · ") + styleModel.Render(a.model)
 	var session string
 	if a.sessionID != "" {
-		session = styleDim.Render(fmt.Sprintf("  session: %s (%d turns)", a.sessionID, a.turnCount))
+		session = styleDim.Render(fmt.Sprintf(" · session: %s", a.sessionID))
 	}
-	line := brand + ver + session
+	if a.turnCount > 0 {
+		session += styleDim.Render(fmt.Sprintf(" (%d turns)", a.turnCount))
+	}
+	line := brand + ver + model + session
 	sep := styleDim.Render(strings.Repeat("─", a.width))
 	return line + "\n" + sep
 }
@@ -353,18 +485,47 @@ func (a App) renderFooter() string {
 	sep := styleDim.Render(strings.Repeat("─", a.width))
 	var hints []string
 	if a.waiting {
-		hints = append(hints, styleKey.Render("ctrl+c")+" quit")
+		hints = append(hints,
+			styleKey.Render("esc")+" interrupt",
+			styleKey.Render("ctrl+c")+" quit",
+		)
 	} else {
 		hints = append(hints,
 			styleKey.Render("enter")+" submit",
-			styleKey.Render("/ship")+" deploy",
-			styleKey.Render("/show")+" view spec",
-			styleKey.Render("/help")+" commands",
+			styleKey.Render("/")+" commands",
+			styleKey.Render("↑↓")+" history",
 			styleKey.Render("esc")+" quit",
 		)
 	}
-	bar := styleFooter.Render("  " + strings.Join(hints, styleDim.Render("  ·  ")))
+	bar := "  " + strings.Join(hints, styleDim.Render("  ·  "))
 	return sep + "\n" + bar
+}
+
+func (a App) renderStatusIndicator() string {
+	if !a.waiting {
+		return ""
+	}
+	elapsed := time.Duration(0)
+	for _, s := range a.stages {
+		if !s.done {
+			elapsed = time.Since(s.started)
+			break
+		}
+	}
+	if elapsed == 0 && a.waiting {
+		elapsed = time.Duration(a.shimmerTick) * 80 * time.Millisecond
+	}
+	frame := shimmerFrames[a.shimmerTick%len(shimmerFrames)]
+	indicator := styleStageActive.Render(frame) + " " + styleDim.Render("Working…") + " " + styleStageTime.Render(formatElapsed(elapsed))
+	if len(a.stages) > 0 {
+		for _, s := range a.stages {
+			if !s.done {
+				indicator += styleDim.Render(" · ") + s.name
+				break
+			}
+		}
+	}
+	return "  " + indicator
 }
 
 func (a App) renderStages() string {
@@ -375,11 +536,10 @@ func (a App) renderStages() string {
 	for _, s := range a.stages {
 		if s.done {
 			if s.err != nil {
-				lines = append(lines, fmt.Sprintf("  %s %s %s %s",
+				lines = append(lines, fmt.Sprintf("  %s %s %s",
 					styleStageFail.Render("✗"),
 					s.name,
-					styleStageFail.Render(fmt.Sprintf("failed in %s:", s.elapsed.Round(time.Millisecond))),
-					s.err,
+					styleStageFail.Render(s.err.Error()),
 				))
 			} else {
 				lines = append(lines, fmt.Sprintf("  %s %s %s",
@@ -390,9 +550,10 @@ func (a App) renderStages() string {
 			}
 		} else {
 			elapsed := time.Since(s.started)
-			spinner := a.shimmerText(s.name)
-			lines = append(lines, fmt.Sprintf("  %s %s",
-				spinner,
+			frame := shimmerFrames[a.shimmerTick%len(shimmerFrames)]
+			lines = append(lines, fmt.Sprintf("  %s %s %s",
+				styleStageActive.Render(frame),
+				s.name,
 				styleStageTime.Render(formatElapsed(elapsed)),
 			))
 		}
@@ -401,7 +562,7 @@ func (a App) renderStages() string {
 }
 
 func (a App) renderComposer() string {
-	prompt := styleInfo.Render("❯ ")
+	prompt := stylePrompt.Render("❯ ")
 	if a.waiting {
 		prompt = styleDim.Render("  ")
 	}
@@ -414,35 +575,90 @@ func (a App) renderComposer() string {
 	return box
 }
 
+func (a App) renderSlashPopup() string {
+	if !a.slashPopup || len(a.slashMatches) == 0 {
+		return ""
+	}
+	var lines []string
+	maxShow := 8
+	if len(a.slashMatches) < maxShow {
+		maxShow = len(a.slashMatches)
+	}
+	for i := 0; i < maxShow; i++ {
+		sc := a.slashMatches[i]
+		name := styleCmd.Render("/" + sc.Name)
+		desc := styleDim.Render(" — " + sc.Description)
+		prefix := "  "
+		if i == a.slashSelected {
+			prefix = styleSelected.Render("▸ ")
+		}
+		lines = append(lines, prefix+name+desc)
+	}
+	if len(a.slashMatches) > maxShow {
+		lines = append(lines, styleDim.Render(fmt.Sprintf("  … and %d more", len(a.slashMatches)-maxShow)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (a App) renderStatus() string {
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, fmt.Sprintf("  %s %s", styleDim.Render("Model:"), styleBold.Render(a.model)))
+	lines = append(lines, fmt.Sprintf("  %s %s", styleDim.Render("Session:"), a.sessionID))
+	lines = append(lines, fmt.Sprintf("  %s %d", styleDim.Render("Turns:"), a.turnCount))
+	if a.specLines > 0 {
+		lines = append(lines, fmt.Sprintf("  %s %d lines", styleDim.Render("Spec:"), a.specLines))
+	}
+	lines = append(lines, "")
+	return strings.Join(lines, "\n")
+}
+
 func (a App) renderHelp() string {
-	return fmt.Sprintf(`
-  %s
+	var lines []string
+	lines = append(lines, "")
+	lines = append(lines, "  "+styleBold.Render("Commands:"))
+	lines = append(lines, "")
+	for _, sc := range AllSlashCommands {
+		lines = append(lines, fmt.Sprintf("    %s  %s", styleCmd.Render(fmt.Sprintf("%-12s", "/"+sc.Name)), styleDim.Render(sc.Description)))
+	}
+	lines = append(lines, "")
+	lines = append(lines, "  "+styleDim.Render("Tips:"))
+	lines = append(lines, "    "+styleDim.Render("Enter submits. Shift+Enter for newlines."))
+	lines = append(lines, "    "+styleDim.Render("↑/↓ arrows navigate input history."))
+	lines = append(lines, "    "+styleDim.Render("Type / to see command autocomplete."))
+	lines = append(lines, "")
+	return strings.Join(lines, "\n")
+}
 
-  %s
-    %s   print current spec
-    %s  discard session, start fresh
-    %s   hand the spec to autopilot
-    %s   leave the REPL
-    %s   this list
+// --- Slash popup logic ---
 
-  %s  Enter submits. Use shift+enter for newlines.
-  %s  Up/Down arrows navigate input history.`,
-		styleBold.Render("Commands:"),
-		"",
-		styleInfo.Render("/show"),
-		styleInfo.Render("/clear"),
-		styleInfo.Render("/ship"),
-		styleInfo.Render("/exit"),
-		styleInfo.Render("/help"),
-		styleDim.Render("Tip:"),
-		styleDim.Render("Tip:"),
-	)
+func (a *App) updateSlashPopup() {
+	val := a.input.Value()
+	if strings.HasPrefix(val, "/") && !a.waiting {
+		filter := strings.TrimPrefix(val, "/")
+		filter = strings.ToLower(strings.Fields(filter+" ")[0]) // first word only
+		matches := filterSlashCommands(filter)
+		if len(matches) > 0 && val != "/"+matches[0].Name+" " {
+			a.slashPopup = true
+			a.slashFilter = filter
+			a.slashMatches = matches
+			if a.slashSelected >= len(matches) {
+				a.slashSelected = 0
+			}
+		} else {
+			a.slashPopup = false
+			a.slashMatches = nil
+		}
+	} else {
+		a.slashPopup = false
+		a.slashMatches = nil
+	}
 }
 
 // --- Chat history management ---
 
 func (a *App) appendUser(msg string) {
-	rendered := styleUserMsg.Render(msg)
+	rendered := styleUserLabel.Render("You: ") + styleUserMsg.Render(msg)
 	a.history = append(a.history, chatEntry{Role: "user", Content: rendered})
 }
 
@@ -458,14 +674,19 @@ func (a *App) AppendAI(md string) {
 			rendered = strings.TrimSpace(out)
 		}
 	}
-	a.history = append(a.history, chatEntry{Role: "ai", Content: styleAIMsg.Render(rendered)})
+	a.history = append(a.history, chatEntry{Role: "ai", Content: rendered})
 }
 
 func (a *App) rebuildViewport() {
 	var lines []string
 	for _, e := range a.history {
 		lines = append(lines, e.Content)
-		lines = append(lines, "") // blank line between entries
+		lines = append(lines, "")
+	}
+	// If streaming, show partial content.
+	if a.streaming && a.streamBuf.Len() > 0 {
+		partial := a.streamBuf.String()
+		lines = append(lines, styleDim.Render(partial))
 	}
 	content := strings.Join(lines, "\n")
 	a.viewport.SetContent(content)
@@ -484,11 +705,6 @@ func (a *App) recalcLayout() {
 
 var shimmerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-func (a App) shimmerText(text string) string {
-	frame := shimmerFrames[a.shimmerTick%len(shimmerFrames)]
-	return styleStageActive.Render(frame + " " + text)
-}
-
 func formatElapsed(d time.Duration) string {
 	d = d.Round(time.Second)
 	if d < time.Minute {
@@ -496,7 +712,7 @@ func formatElapsed(d time.Duration) string {
 	}
 	m := int(d / time.Minute)
 	s := int((d % time.Minute) / time.Second)
-	return fmt.Sprintf("%dm%02ds", m, s)
+	return fmt.Sprintf("%dm %02ds", m, s)
 }
 
 // --- Public API for REPL wiring ---
@@ -513,3 +729,9 @@ func StageEnd(name string, elapsed time.Duration, err error) tea.Msg {
 func SpecDone(final string, lines int, warnings []string, err error) tea.Msg {
 	return specDoneMsg{Final: final, Lines: lines, Warnings: warnings, Err: err}
 }
+
+// StreamChunk sends a streaming text chunk to the TUI.
+func StreamChunk(text string) tea.Msg { return streamChunkMsg{Text: text} }
+
+// StreamDone signals the end of a streaming response.
+func StreamDone() tea.Msg { return streamDoneMsg{} }

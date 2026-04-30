@@ -2,22 +2,18 @@ package tui
 
 import "time"
 
-// Bubbletea message types for the TUI event loop.
+// Messages exchanged between the REPL wiring layer and the TUI.
 
-// stageStartMsg signals a pipeline stage has started.
+type tickMsg time.Time
+
 type stageStartMsg struct{ Name string }
-
-// stageEndMsg signals a pipeline stage completed.
 type stageEndMsg struct {
 	Name    string
 	Elapsed time.Duration
 	Err     error
 }
+type stageProgressMsg struct{ Name string }
 
-// stageProgressMsg is a periodic tick for active stages.
-type stageProgressMsg struct{}
-
-// specDoneMsg signals the specgen pipeline finished.
 type specDoneMsg struct {
 	Final    string
 	Lines    int
@@ -25,11 +21,12 @@ type specDoneMsg struct {
 	Err      error
 }
 
-// tickMsg drives shimmer animation and elapsed-time updates.
-type tickMsg time.Time
+// Streaming messages for live response rendering.
+type streamChunkMsg struct{ Text string }
+type streamDoneMsg struct{}
 
-// chatEntry is one item in the scrollable chat history.
+// chatEntry represents one item in the chat history.
 type chatEntry struct {
 	Role    string // "user", "ai", "system"
-	Content string // raw text or rendered markdown
+	Content string // pre-rendered content
 }
